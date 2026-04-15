@@ -1,0 +1,24 @@
+[package]
+name = "zignocchio-mollusk-tests"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+mollusk-svm = { version = "0.12.1-agave-4.0", features = ["all-builtins"] }
+solana-pubkey = "4.2.0"
+solana-account = "3.4.0"
+solana-instruction = "3.4.0"
+solana-program-error = "3.0.1"
+
+[[test]]
+name = "hello_mollusk"
+path = "tests/hello_mollusk.rs"
+
+[[test]]
+name = "counter_mollusk"
+path = "tests/counter_mollusk.rs"
+
+[[test]]
+name = "vault_mollusk"
+path = "tests/vault_mollusk.rs"

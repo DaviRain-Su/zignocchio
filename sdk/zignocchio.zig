@@ -71,6 +71,9 @@ pub const guard = @import("guard.zig");
 pub const schema = @import("schema.zig");
 pub const system = @import("system.zig");
 pub const idioms = @import("idioms.zig");
+pub const anti_patterns = @import("anti_patterns.zig");
+pub const memo = @import("memo.zig");
+pub const token_2022 = @import("token_2022.zig");
 
 // Re-export commonly used types
 pub const ProgramError = errors.ProgramError;
