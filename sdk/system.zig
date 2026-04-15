@@ -144,6 +144,110 @@ pub fn transfer(
     try sdk.invoke(&instruction, &[_]sdk.AccountInfo{ from, to });
 }
 
+/// Assign a new owner to an account via System Program CPI.
+pub fn assign(
+    account: sdk.AccountInfo,
+    owner: *const sdk.Pubkey,
+) sdk.ProgramResult {
+    var system_program_id: sdk.Pubkey = undefined;
+    getSystemProgramId(&system_program_id);
+
+    var ix_data: [36]u8 = undefined;
+    @memset(&ix_data, 0);
+    std.mem.writeInt(u32, ix_data[0..4], 1, .little); // Assign instruction index
+    @memcpy(ix_data[4..36], owner[0..32]);
+
+    const account_metas = [_]sdk.AccountMeta{
+        .{ .pubkey = account.key(), .is_signer = true, .is_writable = true },
+    };
+
+    const instruction = sdk.Instruction{
+        .program_id = &system_program_id,
+        .accounts = &account_metas,
+        .data = &ix_data,
+    };
+
+    try sdk.invoke(&instruction, &[_]sdk.AccountInfo{account});
+}
+
+/// Allocate space in an account via System Program CPI.
+pub fn allocate(
+    account: sdk.AccountInfo,
+    space: u64,
+) sdk.ProgramResult {
+    var system_program_id: sdk.Pubkey = undefined;
+    getSystemProgramId(&system_program_id);
+
+    var ix_data: [12]u8 = undefined;
+    @memset(&ix_data, 0);
+    std.mem.writeInt(u32, ix_data[0..4], 8, .little); // Allocate instruction index
+    std.mem.writeInt(u64, ix_data[4..12], space, .little);
+
+    const account_metas = [_]sdk.AccountMeta{
+        .{ .pubkey = account.key(), .is_signer = true, .is_writable = true },
+    };
+
+    const instruction = sdk.Instruction{
+        .program_id = &system_program_id,
+        .accounts = &account_metas,
+        .data = &ix_data,
+    };
+
+    try sdk.invoke(&instruction, &[_]sdk.AccountInfo{account});
+}
+
+/// Reallocate space in an account via System Program CPI.
+pub fn realloc(
+    account: sdk.AccountInfo,
+    new_space: u64,
+    zero_init: bool,
+) sdk.ProgramResult {
+    var system_program_id: sdk.Pubkey = undefined;
+    getSystemProgramId(&system_program_id);
+
+    var ix_data: [13]u8 = undefined;
+    @memset(&ix_data, 0);
+    std.mem.writeInt(u32, ix_data[0..4], 11, .little); // ReAlloc instruction index
+    std.mem.writeInt(u64, ix_data[4..12], new_space, .little);
+    ix_data[12] = if (zero_init) 1 else 0;
+
+    const account_metas = [_]sdk.AccountMeta{
+        .{ .pubkey = account.key(), .is_signer = true, .is_writable = true },
+    };
+
+    const instruction = sdk.Instruction{
+        .program_id = &system_program_id,
+        .accounts = &account_metas,
+        .data = &ix_data,
+    };
+
+    try sdk.invoke(&instruction, &[_]sdk.AccountInfo{account});
+}
+
+/// Advance a nonce account via System Program CPI.
+pub fn advanceNonceAccount(
+    nonce_account: sdk.AccountInfo,
+    authorized_account: sdk.AccountInfo,
+) sdk.ProgramResult {
+    var system_program_id: sdk.Pubkey = undefined;
+    getSystemProgramId(&system_program_id);
+
+    const ix_data = &[_]u8{ 4, 0, 0, 0 }; // AdvanceNonceAccount instruction index (u32 LE)
+
+    const account_metas = [_]sdk.AccountMeta{
+        .{ .pubkey = nonce_account.key(), .is_signer = false, .is_writable = true },
+        .{ .pubkey = authorized_account.key(), .is_signer = true, .is_writable = false },
+    };
+
+    const instruction = sdk.Instruction{
+        .program_id = &system_program_id,
+        .accounts = &account_metas,
+        .data = ix_data,
+    };
+
+    try sdk.invoke(&instruction, &[_]sdk.AccountInfo{ nonce_account, authorized_account });
+}
+
 // =============================================================================
 // Tests
 // =============================================================================
@@ -249,4 +353,42 @@ test "mockInvoke rejects wrong program id" {
         .data = ix_data,
     };
     try std.testing.expectError(error.IncorrectProgramId, mockInvoke(&instruction, &[_]sdk.AccountInfo{}));
+}
+
+test "assign instruction data format" {
+    var ix_data: [36]u8 = undefined;
+    @memset(&ix_data, 0);
+    std.mem.writeInt(u32, ix_data[0..4], 1, .little);
+    const owner: sdk.Pubkey = .{3} ** 32;
+    @memcpy(ix_data[4..36], &owner);
+
+    try std.testing.expectEqual(@as(u32, 1), std.mem.readInt(u32, ix_data[0..4], .little));
+    try std.testing.expectEqual(owner, ix_data[4..36].*);
+}
+
+test "allocate instruction data format" {
+    var ix_data: [12]u8 = undefined;
+    @memset(&ix_data, 0);
+    std.mem.writeInt(u32, ix_data[0..4], 8, .little);
+    std.mem.writeInt(u64, ix_data[4..12], 256, .little);
+
+    try std.testing.expectEqual(@as(u32, 8), std.mem.readInt(u32, ix_data[0..4], .little));
+    try std.testing.expectEqual(@as(u64, 256), std.mem.readInt(u64, ix_data[4..12], .little));
+}
+
+test "realloc instruction data format" {
+    var ix_data: [13]u8 = undefined;
+    @memset(&ix_data, 0);
+    std.mem.writeInt(u32, ix_data[0..4], 11, .little);
+    std.mem.writeInt(u64, ix_data[4..12], 512, .little);
+    ix_data[12] = 1;
+
+    try std.testing.expectEqual(@as(u32, 11), std.mem.readInt(u32, ix_data[0..4], .little));
+    try std.testing.expectEqual(@as(u64, 512), std.mem.readInt(u64, ix_data[4..12], .little));
+    try std.testing.expectEqual(@as(u8, 1), ix_data[12]);
+}
+
+test "advanceNonceAccount instruction data format" {
+    const ix_data = &[_]u8{ 4, 0, 0, 0 };
+    try std.testing.expectEqual(@as(u32, 4), std.mem.readInt(u32, ix_data[0..4], .little));
 }

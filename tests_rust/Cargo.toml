@@ -26,3 +26,15 @@ path = "examples/counter.rs"
 [[test]]
 name = "vault_mollusk"
 path = "examples/vault.rs"
+
+[[test]]
+name = "transfer_sol_mollusk"
+path = "examples/transfer_sol.rs"
+
+[[test]]
+name = "pda_storage_mollusk"
+path = "examples/pda_storage.rs"
+
+[[test]]
+name = "escrow_mollusk"
+path = "examples/escrow.rs"
