@@ -18,11 +18,13 @@ import {
 import * as path from 'path';
 import { execSync } from 'child_process';
 
+const projectRoot = path.join(__dirname, '..', '..', '..');
+
 describe('litesvm logonly isolation test', () => {
-  const programPath = path.join(__dirname, '..', 'zig-out', 'lib', 'logonly.so');
+  const programPath = path.join(projectRoot, 'zig-out', 'lib', 'logonly.so');
 
   beforeAll(() => {
-    execSync('zig build -Dexample=logonly', { stdio: 'inherit' });
+    execSync('zig build -Dexample=logonly', { stdio: 'inherit', cwd: projectRoot });
   });
 
   it('executes a program that only calls sol_log_', async () => {

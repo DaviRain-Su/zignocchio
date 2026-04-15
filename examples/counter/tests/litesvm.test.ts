@@ -11,7 +11,7 @@ import {
   sendTransaction,
   setAccount,
   getAccount,
-} from '../client/src/litesvm';
+} from '../../../client/src/litesvm';
 import { TransactionInstruction, Keypair } from '@solana/web3.js';
 
 describe('counter litesvm integration', () => {

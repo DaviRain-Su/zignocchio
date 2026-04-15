@@ -33,6 +33,12 @@ fn setup_mollusk() -> Mollusk {
     let loader_v3 = solana_pubkey::pubkey!("BPFLoaderUpgradeab1e11111111111111111111111");
     let mut mollusk = Mollusk::default();
     mollusk.add_program_with_loader_and_elf(&pid, &loader_v3, &elf);
+    // Add System Program builtin so CPI transfers work
+    mollusk.program_cache.add_builtin(mollusk_svm::program::Builtin {
+        program_id: SYSTEM_PROGRAM_ID,
+        name: "system_program",
+        entrypoint: solana_system_program::system_processor::Entrypoint::vm,
+    });
     mollusk
 }
 

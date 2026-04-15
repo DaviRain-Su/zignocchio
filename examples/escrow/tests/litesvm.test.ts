@@ -12,7 +12,7 @@ import {
   sendTransaction,
   getAccount,
   airdrop,
-} from '../client/src/litesvm';
+} from '../../../client/src/litesvm';
 import { TransactionInstruction, Keypair, PublicKey, SystemProgram } from '@solana/web3.js';
 
 describe('escrow litesvm integration', () => {

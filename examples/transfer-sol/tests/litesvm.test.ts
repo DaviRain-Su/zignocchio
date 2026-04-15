@@ -11,7 +11,7 @@ import {
   sendTransaction,
   getAccount,
   airdrop,
-} from '../client/src/litesvm';
+} from '../../../client/src/litesvm';
 import {
   Keypair,
   PublicKey,

@@ -8,7 +8,7 @@ import {
   startLitesvm,
   deployProgramToLitesvm,
   sendTransaction,
-} from '../client/src/litesvm';
+} from '../../../client/src/litesvm';
 import { TransactionInstruction } from '@solana/web3.js';
 
 describe('hello litesvm integration', () => {

@@ -62,7 +62,7 @@ describe('Token Vault Program', () => {
     );
 
     // Start test validator with program deployed
-    const programPath = path.join(__dirname, '..', 'zig-out', 'lib', 'token-vault.so');
+    const programPath = path.join(__dirname, '..', '..', '..', 'zig-out', 'lib', 'token-vault.so');
 
     if (!fs.existsSync(programPath)) {
       throw new Error(`Program not found at ${programPath}. Run 'zig build' first.`);

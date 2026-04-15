@@ -39,7 +39,7 @@ describe('Escrow Program', () => {
     const programKeypairPath = path.join(__dirname, '..', 'test-program-keypair.json');
     fs.writeFileSync(programKeypairPath, JSON.stringify(Array.from(programKeypair.secretKey)));
 
-    const programPath = path.join(__dirname, '..', 'zig-out', 'lib', 'escrow.so');
+    const programPath = path.join(__dirname, '..', '..', '..', 'zig-out', 'lib', 'escrow.so');
     if (!fs.existsSync(programPath)) {
       throw new Error(`Program not found at ${programPath}`);
     }

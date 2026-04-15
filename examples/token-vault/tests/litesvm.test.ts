@@ -15,7 +15,7 @@ import {
   getAccount,
   setAccount,
   airdrop,
-} from '../client/src/litesvm';
+} from '../../../client/src/litesvm';
 import { TransactionInstruction, Keypair, PublicKey, SystemProgram } from '@solana/web3.js';
 import { TOKEN_PROGRAM_ID } from '@solana/spl-token';
 import * as bufferLayout from '@solana/buffer-layout';

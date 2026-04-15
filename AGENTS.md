@@ -31,8 +31,9 @@
 | `examples/token-vault/lib.zig` | Token Program CPI example |
 | `examples/escrow/lib.zig` | Full security flow example |
 | `client/src/litesvm.ts` | v1 → `@solana/kit` adapter for litesvm tests |
-| `tests_litesvm/` | Litesvm TypeScript integration tests |
-| `tests_rust/` | Rust `mollusk-svm` tests that load Zig `.so` files |
+| `examples/{name}/tests/litesvm.test.ts` | Litesvm TypeScript integration tests |
+| `examples/{name}/tests/surfpool.test.ts` | Legacy surfpool TypeScript integration tests |
+| `tests_rust/examples/{name}.rs` | Rust `mollusk-svm` tests that load Zig `.so` files |
 | `docs/` | Human-readable PRD / architecture docs |
 
 ## Quick Commands
@@ -44,14 +45,14 @@ zig build -Dexample=hello
 # Run Zig unit tests
 zig build test
 
-# Run litesvm integration tests
-npx jest tests_litesvm
+# Run all litesvm integration tests
+npx jest examples --testPathIgnorePatterns='surfpool'
 
 # Run Rust mollusk-svm tests
 cd tests_rust && cargo test
 
 # Run legacy surfpool tests
-npx jest examples/vault.test.ts
+npx jest examples --testPathPattern='surfpool'
 ```
 
 ## Critical Rules (One-liners)
