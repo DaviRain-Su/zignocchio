@@ -65,8 +65,10 @@ pub const SetAuthority = struct {
         }
 
         // Build instruction
-        const instruction = cpi.Instruction{
-            .program_id = &token_mod.TOKEN_PROGRAM_ID,
+                var token_program_id: types.Pubkey = undefined;
+                token_mod.getTokenProgramId(&token_program_id);
+                const instruction = cpi.Instruction{
+            .program_id = &token_program_id,
             .accounts = &account_metas,
             .data = if (self.new_authority != null) &instruction_data else instruction_data[0..3],
         };

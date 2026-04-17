@@ -44,8 +44,10 @@ pub const Burn = struct {
         std.mem.writeInt(u64, instruction_data[1..9], self.amount, .little);
 
         // Build instruction
-        const instruction = cpi.Instruction{
-            .program_id = &token_mod.TOKEN_PROGRAM_ID,
+                var token_program_id: types.Pubkey = undefined;
+                token_mod.getTokenProgramId(&token_program_id);
+                const instruction = cpi.Instruction{
+            .program_id = &token_program_id,
             .accounts = &account_metas,
             .data = &instruction_data,
         };
@@ -95,8 +97,10 @@ pub const BurnChecked = struct {
         instruction_data[9] = self.decimals;
 
         // Build instruction
-        const instruction = cpi.Instruction{
-            .program_id = &token_mod.TOKEN_PROGRAM_ID,
+                var token_program_id: types.Pubkey = undefined;
+                token_mod.getTokenProgramId(&token_program_id);
+                const instruction = cpi.Instruction{
+            .program_id = &token_program_id,
             .accounts = &account_metas,
             .data = &instruction_data,
         };

@@ -55,7 +55,9 @@ pub const Mint = extern struct {
         }
 
         // Check owner
-        if (!types.pubkeyEq(account.owner(), &token_mod.TOKEN_PROGRAM_ID)) {
+        var token_program_id: types.Pubkey = undefined;
+        token_mod.getTokenProgramId(&token_program_id);
+        if (!types.pubkeyEq(account.owner(), &token_program_id)) {
             return error.IncorrectProgramId;
         }
 

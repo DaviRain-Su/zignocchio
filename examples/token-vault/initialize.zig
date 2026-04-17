@@ -9,6 +9,15 @@ const sdk = @import("sdk");
 /// Discriminator for initialize instruction
 pub const DISCRIMINATOR: u8 = 2;
 
+fn getSystemProgramId() sdk.Pubkey {
+    return .{
+        0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0,
+    };
+}
+
 /// Validated accounts for initialize instruction
 pub const InitializeAccounts = struct {
     vault_token_account: sdk.AccountInfo,
@@ -38,26 +47,26 @@ pub fn validateAccounts(
     const token_program = accounts[4];
     const rent_sysvar = accounts[5];
 
-    // Validate owner must sign the transaction
     if (!owner.isSigner()) {
         sdk.logMsg("Error: Owner must be signer");
         return error.MissingRequiredSignature;
     }
 
-    // Validate token program ID
-    if (!sdk.pubkeyEq(token_program.key(), &sdk.token.TOKEN_PROGRAM_ID)) {
+    var token_program_id: sdk.Pubkey = undefined;
+    sdk.token.getTokenProgramId(&token_program_id);
+    if (!sdk.pubkeyEq(token_program.key(), &token_program_id)) {
         sdk.logMsg("Error: Invalid token program");
         return error.IncorrectProgramId;
     }
 
-    // Validate system program ID
-    const SYSTEM_PROGRAM_ID: sdk.Pubkey = .{
+    sdk.logMsg("Debug: check system program");
+    var system_program_id: sdk.Pubkey = .{
         0, 0, 0, 0, 0, 0, 0, 0,
         0, 0, 0, 0, 0, 0, 0, 0,
         0, 0, 0, 0, 0, 0, 0, 0,
         0, 0, 0, 0, 0, 0, 0, 0,
     };
-    if (!sdk.pubkeyEq(system_program.key(), &SYSTEM_PROGRAM_ID)) {
+    if (!sdk.pubkeyEq(system_program.key(), &system_program_id)) {
         sdk.logMsg("Error: Invalid system program");
         return error.IncorrectProgramId;
     }
@@ -121,22 +130,19 @@ pub fn process(
     std.mem.writeInt(u32, create_account_data[0..4], 0, .little); // CreateAccount = 0
     std.mem.writeInt(u64, create_account_data[4..12], lamports, .little);
     std.mem.writeInt(u64, create_account_data[12..20], token_account_size, .little);
-    @memcpy(create_account_data[20..52], &sdk.token.TOKEN_PROGRAM_ID);
+    var token_program_id_2: sdk.Pubkey = undefined;
+    sdk.token.getTokenProgramId(&token_program_id_2);
+    @memcpy(create_account_data[20..52], &token_program_id_2);
 
     const create_account_metas = [_]sdk.AccountMeta{
         .{ .pubkey = validated.owner.key(), .is_writable = true, .is_signer = true },
         .{ .pubkey = validated.vault_token_account.key(), .is_writable = true, .is_signer = true },
     };
 
-    const SYSTEM_PROGRAM_ID: sdk.Pubkey = .{
-        0, 0, 0, 0, 0, 0, 0, 0,
-        0, 0, 0, 0, 0, 0, 0, 0,
-        0, 0, 0, 0, 0, 0, 0, 0,
-        0, 0, 0, 0, 0, 0, 0, 0,
-    };
+    var system_program_id_2 = getSystemProgramId();
 
     const create_account_ix = sdk.Instruction{
-        .program_id = &SYSTEM_PROGRAM_ID,
+        .program_id = &system_program_id_2,
         .accounts = &create_account_metas,
         .data = &create_account_data,
     };
@@ -156,8 +162,10 @@ pub fn process(
         .{ .pubkey = validated.mint.key(), .is_writable = false, .is_signer = false },
     };
 
+    var token_program_id_3: sdk.Pubkey = undefined;
+    sdk.token.getTokenProgramId(&token_program_id_3);
     const init_account_ix = sdk.Instruction{
-        .program_id = &sdk.token.TOKEN_PROGRAM_ID,
+        .program_id = &token_program_id_3,
         .accounts = &init_account_metas,
         .data = &init_account_data,
     };

@@ -21,15 +21,15 @@ pub const MAX_PERMITTED_DATA_INCREASE: usize = 10 * 1024;
 /// BPF alignment for u128
 pub const BPF_ALIGN_OF_U128: usize = 8;
 
-/// Compare two pubkeys for equality (optimized)
+/// Compare two pubkeys for equality
+/// Uses manual byte-wise comparison to avoid alignment requirements
+/// and minimize generated code size for sBPF.
 pub fn pubkeyEq(p1: *const Pubkey, p2: *const Pubkey) bool {
-    const p1_ptr = @as([*]const u64, @ptrCast(@alignCast(p1)));
-    const p2_ptr = @as([*]const u64, @ptrCast(@alignCast(p2)));
-
-    return p1_ptr[0] == p2_ptr[0] and
-           p1_ptr[1] == p2_ptr[1] and
-           p1_ptr[2] == p2_ptr[2] and
-           p1_ptr[3] == p2_ptr[3];
+    var i: usize = 0;
+    while (i < PUBKEY_BYTES) : (i += 1) {
+        if (p1[i] != p2[i]) return false;
+    }
+    return true;
 }
 
 /// Raw account data structure (matches Solana's memory layout)

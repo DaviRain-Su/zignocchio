@@ -33,7 +33,7 @@ zig build
 
 This generates:
 1. `entrypoint.bc` - LLVM bitcode from Zig source
-2. `zig-out/lib/program_name.so` - Final Solana program
+2. `zig-out/lib/{example_name}.so` - Final Solana program (e.g., `zig-out/lib/hello.so`)
 
 ## Testing
 

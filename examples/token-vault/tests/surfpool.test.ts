@@ -35,9 +35,9 @@ describe('Token Vault Program', () => {
   const INITIALIZE = 2;
 
   beforeAll(async () => {
-    // Kill any existing test validator
+    // Kill any existing surfpool
     try {
-      execSync('killall -9 solana-test-validator node jest', { stdio: 'ignore' });
+      execSync('pkill -f surfpool', { stdio: 'ignore' });
     } catch (e) {
       // Ignore if no process found
     }
@@ -62,19 +62,18 @@ describe('Token Vault Program', () => {
     );
 
     // Start test validator with program deployed
-    const programPath = path.join(__dirname, '..', 'zig-out', 'lib', 'program_name.so');
+    const programPath = path.join(__dirname, '..', '..', '..', 'zig-out', 'lib', 'token-vault.so');
 
     if (!fs.existsSync(programPath)) {
       throw new Error(`Program not found at ${programPath}. Run 'zig build' first.`);
     }
 
-    console.log('Starting solana-test-validator...');
-    validator = spawn('solana-test-validator', [
-      '--reset',
-      '--quiet',
-      '--bpf-program',
-      programKeypairPath,
-      programPath,
+    console.log('Starting surfpool...');
+    validator = spawn('surfpool', [
+      'start',
+      '--ci',
+      '--no-tui',
+      '--offline',
     ], {
       detached: true,
       stdio: ['ignore', 'pipe', 'pipe'],
@@ -108,6 +107,32 @@ describe('Token Vault Program', () => {
     await connection.confirmTransaction(airdropSig);
 
     console.log('Payer funded:', payer.publicKey.toBase58());
+
+    // Deploy program via surfnet_setAccount cheatcode (direct load, no upgradeable loader)
+    const programData = fs.readFileSync(programPath);
+    const deployRes = await fetch('http://127.0.0.1:8899', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        jsonrpc: '2.0',
+        id: 1,
+        method: 'surfnet_setAccount',
+        params: [
+          programId.toBase58(),
+          {
+            lamports: 1000000000,
+            data: programData.toString('hex'),
+            owner: 'BPFLoader2111111111111111111111111111111111',
+            executable: true,
+          },
+        ],
+      }),
+    });
+    const deployJson = await deployRes.json() as any;
+    if (deployJson.error) {
+      throw new Error(`surfnet_setAccount failed: ${deployJson.error.message}`);
+    }
+    console.log('Deploying program...');
 
     // Create mint
     mint = await createMint(
@@ -169,7 +194,7 @@ describe('Token Vault Program', () => {
   }, 60000);
 
   afterAll(async () => {
-    // Kill the validator
+    // Kill surfpool
     if (validator) {
       try {
         process.kill(-validator.pid!);
@@ -180,7 +205,14 @@ describe('Token Vault Program', () => {
 
     // Clean up
     try {
-      execSync('killall -9 solana-test-validator', { stdio: 'ignore' });
+      execSync('pkill -f surfpool', { stdio: 'ignore' });
+    } catch (e) {
+      // Ignore
+    }
+
+    // Clean up temp keypair file
+    try {
+      fs.unlinkSync(path.join(__dirname, '..', 'test-program-keypair.json'));
     } catch (e) {
       // Ignore
     }

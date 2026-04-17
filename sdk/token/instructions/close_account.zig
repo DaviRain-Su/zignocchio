@@ -44,8 +44,10 @@ pub const CloseAccount = struct {
         const instruction_data = [_]u8{9};
 
         // Build instruction
+        var token_program_id: types.Pubkey = undefined;
+        token_mod.getTokenProgramId(&token_program_id);
         const instruction = cpi.Instruction{
-            .program_id = &token_mod.TOKEN_PROGRAM_ID,
+            .program_id = &token_program_id,
             .accounts = &account_metas,
             .data = &instruction_data,
         };

@@ -83,13 +83,15 @@ pub fn findProgramAddress(
 /// # Arguments
 /// * `seeds` - Slice of seed slices used to derive the address
 /// * `program_id` - The program ID to use for derivation
+/// * `out_address` - Output parameter for the derived address
 ///
-/// # Returns
-/// The derived address or error if invalid
+/// # Note
+/// sBPF does not support aggregate returns, so this uses an output parameter.
 pub fn createProgramAddress(
     seeds: []const []const u8,
     program_id: *const Pubkey,
-) errors.ProgramError!Pubkey {
+    out_address: *Pubkey,
+) errors.ProgramResult {
     // Validate seeds
     if (seeds.len > MAX_SEEDS) {
         return error.MaxSeedLengthExceeded;
@@ -107,17 +109,15 @@ pub fn createProgramAddress(
         };
     }
 
-    var address: Pubkey = undefined;
-
     const result = syscalls.sol_create_program_address(
         @as([*]const u8, @ptrCast(&sol_seeds)),
         seeds.len,
         @as([*]const u8, @ptrCast(program_id)),
-        &address,
+        out_address,
     );
 
     if (result == errors.SUCCESS) {
-        return address;
+        return;
     }
 
     return error.InvalidArgument;

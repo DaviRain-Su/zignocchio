@@ -1,0 +1,44 @@
+{
+  "name": "@zignocchio/client",
+  "version": "0.1.0",
+  "description": "TypeScript client helpers for Zignocchio Solana programs",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": "./dist/index.js",
+    "./pda": "./dist/pda.js",
+    "./layout": "./dist/layout.js",
+    "./instruction": "./dist/instruction.js",
+    "./surfpool": "./dist/surfpool.js",
+    "./litesvm": "./dist/litesvm.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "test": "jest --config jest.config.js",
+    "clean": "rm -rf dist",
+    "prepublishOnly": "npm run clean && npm run build && npm test",
+    "publish:local": "npm run prepublishOnly && npm pack"
+  },
+  "peerDependencies": {
+    "@solana/web3.js": "^1.95.0",
+    "@solana/kit": "^2.0.0",
+    "litesvm": "^1.0.0"
+  },
+  "peerDependenciesMeta": {
+    "@solana/kit": {
+      "optional": true
+    },
+    "litesvm": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@solana/web3.js": "^1.95.0",
+    "@solana/kit": "^2.0.0",
+    "@types/jest": "^29.5.0",
+    "jest": "^29.7.0",
+    "litesvm": "^1.0.0",
+    "ts-jest": "^29.1.0",
+    "typescript": "^5.0.0"
+  }
+}

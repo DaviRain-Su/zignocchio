@@ -43,8 +43,10 @@ pub const FreezeAccount = struct {
         const instruction_data = [_]u8{10};
 
         // Build instruction
-        const instruction = cpi.Instruction{
-            .program_id = &token_mod.TOKEN_PROGRAM_ID,
+                var token_program_id: types.Pubkey = undefined;
+                token_mod.getTokenProgramId(&token_program_id);
+                const instruction = cpi.Instruction{
+            .program_id = &token_program_id,
             .accounts = &account_metas,
             .data = &instruction_data,
         };
@@ -90,8 +92,10 @@ pub const ThawAccount = struct {
         const instruction_data = [_]u8{11};
 
         // Build instruction
-        const instruction = cpi.Instruction{
-            .program_id = &token_mod.TOKEN_PROGRAM_ID,
+                var token_program_id: types.Pubkey = undefined;
+                token_mod.getTokenProgramId(&token_program_id);
+                const instruction = cpi.Instruction{
+            .program_id = &token_program_id,
             .accounts = &account_metas,
             .data = &instruction_data,
         };
