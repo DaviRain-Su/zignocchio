@@ -81,6 +81,27 @@ pub fn build(b: *std.Build) !void {
         "tests/compile_fail/context_invalid_wrapper_declaration.zig",
         "invalid account wrapper declaration",
     );
+    addCompileFailFixture(
+        b,
+        test_step,
+        "readonly_account_no_mut_data",
+        "tests/compile_fail/readonly_account_no_mut_data.zig",
+        "tryBorrowMutData",
+    );
+    addCompileFailFixture(
+        b,
+        test_step,
+        "signer_no_mut_data",
+        "tests/compile_fail/signer_no_mut_data.zig",
+        "tryBorrowMutData",
+    );
+    addCompileFailFixture(
+        b,
+        test_step,
+        "program_account_no_mut_lamports",
+        "tests/compile_fail/program_account_no_mut_lamports.zig",
+        "tryBorrowMutLamports",
+    );
 
     // Keep representative low-level examples build-safe as part of the normal
     // Zig validator. Each regression build uses its own bitcode path so

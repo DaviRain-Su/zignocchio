@@ -17,18 +17,27 @@ const AccountWrapperKind = enum {
 };
 
 /// Signed account declaration marker.
-pub const Signer = accountWrapper(.signer);
+pub const Signer = accountWrapper(.signer, null);
 
 /// Writable account declaration marker.
-pub const WritableAccount = accountWrapper(.writable);
+pub const WritableAccount = accountWrapper(.writable, null);
 
 /// Read-only account declaration marker.
-pub const ReadonlyAccount = accountWrapper(.readonly);
+///
+/// Runtime accounts marked writable are rejected with `error.ImmutableAccount`
+/// so handlers cannot accidentally accept a mutable account through a readonly
+/// declaration.
+pub const ReadonlyAccount = accountWrapper(.readonly, null);
 
 /// Executable program account declaration marker.
-pub const ProgramAccount = accountWrapper(.program);
+pub const ProgramAccount = accountWrapper(.program, null);
 
-fn accountWrapper(comptime kind: AccountWrapperKind) type {
+/// Executable program account declaration marker with a required program id.
+pub fn ProgramAccountWithId(comptime expected_program_id: types.Pubkey) type {
+    return accountWrapper(.program, expected_program_id);
+}
+
+fn accountWrapper(comptime kind: AccountWrapperKind, comptime expected_program_id: ?types.Pubkey) type {
     if (kind == .writable) {
         return struct {
             pub const zignocchio_framework_account_wrapper = kind;
@@ -59,17 +68,54 @@ fn accountWrapper(comptime kind: AccountWrapperKind) type {
             pub fn executable(self: @This()) bool {
                 return self.account.executable();
             }
+
+            /// Get the current account data length.
+            pub fn dataLen(self: @This()) usize {
+                return self.account.dataLen();
+            }
+
+            /// Get the current lamport balance.
+            pub fn lamports(self: @This()) u64 {
+                return self.account.lamports();
+            }
+
+            /// Borrow account data immutably via the existing RAII API.
+            pub fn tryBorrowData(self: @This()) errors.ProgramError!types.Ref([]const u8) {
+                return self.account.tryBorrowData();
+            }
+
+            /// Borrow lamports immutably via the existing RAII API.
+            pub fn tryBorrowLamports(self: @This()) errors.ProgramError!types.Ref(*const u64) {
+                return self.account.tryBorrowLamports();
+            }
+
+            /// Borrow account data mutably via the existing RAII API.
+            pub fn tryBorrowMutData(self: @This()) errors.ProgramError!types.RefMut([]u8) {
+                return self.account.tryBorrowMutData();
+            }
+
+            /// Borrow lamports mutably via the existing RAII API.
+            pub fn tryBorrowMutLamports(self: @This()) errors.ProgramError!types.RefMut(*u64) {
+                return self.account.tryBorrowMutLamports();
+            }
         };
     }
 
     return struct {
         pub const zignocchio_framework_account_wrapper = kind;
+        pub const zignocchio_framework_expected_program_id = expected_program_id;
 
+        account_addr: usize,
         key_ptr: *const types.Pubkey,
         owner_ptr: *const types.Pubkey,
         is_signer: bool,
         is_writable: bool,
         is_executable: bool,
+
+        fn accountInfo(self: @This()) types.AccountInfo {
+            const raw: *types.Account = @ptrFromInt(self.account_addr);
+            return .{ .raw = raw };
+        }
 
         /// Access the account public key without exposing mutation-capable APIs.
         pub fn key(self: @This()) *const types.Pubkey {
@@ -94,6 +140,26 @@ fn accountWrapper(comptime kind: AccountWrapperKind) type {
         /// Observe whether the account is executable.
         pub fn executable(self: @This()) bool {
             return self.is_executable;
+        }
+
+        /// Get the current account data length.
+        pub fn dataLen(self: @This()) usize {
+            return self.accountInfo().dataLen();
+        }
+
+        /// Get the current lamport balance.
+        pub fn lamports(self: @This()) u64 {
+            return self.accountInfo().lamports();
+        }
+
+        /// Borrow account data immutably via the existing RAII API.
+        pub fn tryBorrowData(self: @This()) errors.ProgramError!types.Ref([]const u8) {
+            return self.accountInfo().tryBorrowData();
+        }
+
+        /// Borrow lamports immutably via the existing RAII API.
+        pub fn tryBorrowLamports(self: @This()) errors.ProgramError!types.Ref(*const u64) {
+            return self.accountInfo().tryBorrowLamports();
         }
     };
 }
@@ -358,9 +424,19 @@ fn bindAccountField(comptime Field: type, account: types.AccountInfo) errors.Pro
         .writable => if (!account.isWritable()) {
             return error.ImmutableAccount;
         },
-        .readonly => {},
-        .program => if (!account.executable()) {
-            return error.InvalidArgument;
+        .readonly => if (account.isWritable()) {
+            return error.ImmutableAccount;
+        },
+        .program => {
+            if (!account.executable()) {
+                return error.InvalidArgument;
+            }
+            if (comptime expectedProgramId(Field)) |expected| {
+                var expected_key = expected;
+                if (!types.pubkeyEq(account.key(), &expected_key)) {
+                    return error.IncorrectProgramId;
+                }
+            }
         },
     }
 
@@ -369,6 +445,7 @@ fn bindAccountField(comptime Field: type, account: types.AccountInfo) errors.Pro
     }
 
     return .{
+        .account_addr = @intFromPtr(account.raw),
         .key_ptr = account.key(),
         .owner_ptr = account.owner(),
         .is_signer = account.isSigner(),
@@ -426,6 +503,19 @@ fn accountWrapperKind(comptime Field: type) ?AccountWrapperKind {
     }
 
     return marker;
+}
+
+fn expectedProgramId(comptime Field: type) ?types.Pubkey {
+    if (!@hasDecl(Field, "zignocchio_framework_expected_program_id")) {
+        return null;
+    }
+
+    const expected = Field.zignocchio_framework_expected_program_id;
+    if (@TypeOf(expected) != ?types.Pubkey) {
+        @compileError("invalid ProgramAccount expected program id declaration");
+    }
+
+    return expected;
 }
 
 fn validateHandler(comptime handler: anytype, comptime Accounts: type) void {
@@ -533,6 +623,21 @@ fn testAccount(comptime key_byte: u8, comptime is_signer: bool, comptime is_writ
     };
 }
 
+const TestAccountWithData = extern struct {
+    account: types.Account,
+    data: [8]u8,
+};
+
+fn testAccountWithData(comptime key_byte: u8, comptime is_signer: bool, comptime is_writable: bool, comptime is_executable: bool) TestAccountWithData {
+    var account = testAccount(key_byte, is_signer, is_writable, is_executable);
+    account.lamports = 123;
+    account.data_len = 8;
+    return .{
+        .account = account,
+        .data = .{ 0, 1, 2, 3, 4, 5, 6, 7 },
+    };
+}
+
 fn expectAccountKeyByte(account: types.AccountInfo, expected: u8) !void {
     try std.testing.expectEqual(expected, account.key()[0]);
 }
@@ -589,6 +694,7 @@ const NeedsSignerAccounts = struct {
 };
 
 var account_context_handler_calls: usize = 0;
+var wrapper_validation_handler_calls: usize = 0;
 
 fn accountContextHandler(_: Context(NeedsSignerAccounts), _: []const u8) errors.ProgramResult {
     account_context_handler_calls += 1;
@@ -601,6 +707,63 @@ const AccountContextProgram = struct {
             .name = "needs_signer",
             .accounts = NeedsSignerAccounts,
             .handler = accountContextHandler,
+        },
+    };
+};
+
+const NeedsWritableAccounts = struct {
+    writable: WritableAccount,
+};
+
+const NeedsReadonlyAccounts = struct {
+    readonly: ReadonlyAccount,
+};
+
+const NeedsProgramAccounts = struct {
+    program: ProgramAccount,
+};
+
+fn writableValidationHandler(_: Context(NeedsWritableAccounts), _: []const u8) errors.ProgramResult {
+    wrapper_validation_handler_calls += 1;
+    return {};
+}
+
+fn readonlyValidationHandler(_: Context(NeedsReadonlyAccounts), _: []const u8) errors.ProgramResult {
+    wrapper_validation_handler_calls += 1;
+    return {};
+}
+
+fn programValidationHandler(_: Context(NeedsProgramAccounts), _: []const u8) errors.ProgramResult {
+    wrapper_validation_handler_calls += 1;
+    return {};
+}
+
+const WritableValidationProgram = struct {
+    pub const Instruction = .{
+        .{
+            .name = "needs_writable",
+            .accounts = NeedsWritableAccounts,
+            .handler = writableValidationHandler,
+        },
+    };
+};
+
+const ReadonlyValidationProgram = struct {
+    pub const Instruction = .{
+        .{
+            .name = "needs_readonly",
+            .accounts = NeedsReadonlyAccounts,
+            .handler = readonlyValidationHandler,
+        },
+    };
+};
+
+const ProgramValidationProgram = struct {
+    pub const Instruction = .{
+        .{
+            .name = "needs_program",
+            .accounts = NeedsProgramAccounts,
+            .handler = programValidationHandler,
         },
     };
 };
@@ -652,6 +815,7 @@ test "Context accepts first public account wrapper declarations" {
         writable: WritableAccount,
         readonly: ReadonlyAccount,
         program: ProgramAccount,
+        expected_program: ProgramAccountWithId(.{0x21} ** 32),
         raw: types.AccountInfo,
     };
 
@@ -746,7 +910,7 @@ test "Context binds wrapper fields to their ordinal accounts after validation" {
 
     var raw0 = testAccount(10, true, false, false);
     var raw1 = testAccount(11, false, true, false);
-    var raw2 = testAccount(12, false, true, false);
+    var raw2 = testAccount(12, false, false, false);
     var raw3 = testAccount(13, false, false, true);
     var runtime_accounts = [_]types.AccountInfo{
         .{ .raw = &raw0 },
@@ -761,6 +925,129 @@ test "Context binds wrapper fields to their ordinal accounts after validation" {
     try std.testing.expectEqual(@as(u8, 11), ctx.accounts.writable.key()[0]);
     try std.testing.expectEqual(@as(u8, 12), ctx.accounts.readonly.key()[0]);
     try std.testing.expectEqual(@as(u8, 13), ctx.accounts.program.key()[0]);
+}
+
+test "Signer validates signatures and exposes readonly-safe accessors" {
+    var backing = testAccountWithData(14, true, false, false);
+    const signer = try bindAccountField(Signer, .{ .raw = &backing.account });
+
+    try std.testing.expectEqual(@as(u8, 14), signer.key()[0]);
+    try std.testing.expectEqual(@as(u8, 0x42), signer.owner()[0]);
+    try std.testing.expect(signer.isSigner());
+    try std.testing.expect(!signer.isWritable());
+    try std.testing.expect(!signer.executable());
+    try std.testing.expectEqual(@as(usize, 8), signer.dataLen());
+    try std.testing.expectEqual(@as(u64, 123), signer.lamports());
+
+    var data_ref = try signer.tryBorrowData();
+    try std.testing.expectEqual(@as(u8, 0), data_ref.value[0]);
+    data_ref.release();
+
+    var lamports_ref = try signer.tryBorrowLamports();
+    try std.testing.expectEqual(@as(u64, 123), lamports_ref.value.*);
+    lamports_ref.release();
+
+    try std.testing.expect(!@hasDecl(Signer, "tryBorrowMutData"));
+    try std.testing.expect(!@hasDecl(Signer, "tryBorrowMutLamports"));
+
+    var not_signer = testAccount(15, false, false, false);
+    try std.testing.expectError(error.MissingRequiredSignature, bindAccountField(Signer, .{ .raw = &not_signer }));
+}
+
+test "WritableAccount validates writable and delegates mutable borrows" {
+    var backing = testAccountWithData(16, false, true, false);
+    const writable = try bindAccountField(WritableAccount, .{ .raw = &backing.account });
+
+    try std.testing.expectEqual(@as(u8, 16), writable.key()[0]);
+    try std.testing.expect(writable.isWritable());
+    try std.testing.expectEqual(@as(usize, 8), writable.dataLen());
+    try std.testing.expectEqual(@as(u64, 123), writable.lamports());
+
+    var data_ref = try writable.tryBorrowMutData();
+    data_ref.value[0] = 99;
+    try std.testing.expectError(error.AccountBorrowFailed, writable.tryBorrowMutData());
+    data_ref.release();
+
+    var data_ref_after_release = try writable.tryBorrowData();
+    try std.testing.expectEqual(@as(u8, 99), data_ref_after_release.value[0]);
+    data_ref_after_release.release();
+
+    var lamports_ref = try writable.tryBorrowMutLamports();
+    lamports_ref.value.* += 7;
+    try std.testing.expectError(error.AccountBorrowFailed, writable.tryBorrowMutLamports());
+    lamports_ref.release();
+    try std.testing.expectEqual(@as(u64, 130), backing.account.lamports);
+
+    var not_writable = testAccount(17, false, false, false);
+    try std.testing.expectError(error.ImmutableAccount, bindAccountField(WritableAccount, .{ .raw = &not_writable }));
+}
+
+test "ReadonlyAccount rejects writable inputs and exposes immutable borrows only" {
+    var backing = testAccountWithData(18, false, false, false);
+    const readonly = try bindAccountField(ReadonlyAccount, .{ .raw = &backing.account });
+
+    try std.testing.expectEqual(@as(u8, 18), readonly.key()[0]);
+    try std.testing.expect(!readonly.isWritable());
+    try std.testing.expectEqual(@as(usize, 8), readonly.dataLen());
+    try std.testing.expectEqual(@as(u64, 123), readonly.lamports());
+
+    var data_ref = try readonly.tryBorrowData();
+    try std.testing.expectEqual(@as(u8, 0), data_ref.value[0]);
+    data_ref.release();
+
+    var lamports_ref = try readonly.tryBorrowLamports();
+    try std.testing.expectEqual(@as(u64, 123), lamports_ref.value.*);
+    lamports_ref.release();
+
+    try std.testing.expect(!@hasDecl(ReadonlyAccount, "tryBorrowMutData"));
+    try std.testing.expect(!@hasDecl(ReadonlyAccount, "tryBorrowMutLamports"));
+    try std.testing.expect(!@hasField(ReadonlyAccount, "account"));
+
+    var writable_input = testAccount(19, false, true, false);
+    try std.testing.expectError(error.ImmutableAccount, bindAccountField(ReadonlyAccount, .{ .raw = &writable_input }));
+}
+
+test "ProgramAccount validates executable accounts and expected ids" {
+    var executable = testAccount(20, false, false, true);
+    const program = try bindAccountField(ProgramAccount, .{ .raw = &executable });
+
+    try std.testing.expectEqual(@as(u8, 20), program.key()[0]);
+    try std.testing.expect(program.executable());
+    try std.testing.expect(!@hasDecl(ProgramAccount, "tryBorrowMutData"));
+    try std.testing.expect(!@hasDecl(ProgramAccount, "tryBorrowMutLamports"));
+    try std.testing.expect(!@hasField(ProgramAccount, "account"));
+
+    var not_executable = testAccount(21, false, false, false);
+    try std.testing.expectError(error.InvalidArgument, bindAccountField(ProgramAccount, .{ .raw = &not_executable }));
+
+    const ExpectedProgram = ProgramAccountWithId(.{22} ** 32);
+    var matching = testAccount(22, false, false, true);
+    _ = try bindAccountField(ExpectedProgram, .{ .raw = &matching });
+
+    var wrong = testAccount(23, false, false, true);
+    try std.testing.expectError(error.IncorrectProgramId, bindAccountField(ExpectedProgram, .{ .raw = &wrong }));
+}
+
+test "wrapper validation failures prevent handler execution for writable readonly and program accounts" {
+    wrapper_validation_handler_calls = 0;
+
+    var invalid_writable = testAccount(24, false, false, false);
+    var writable_accounts = [_]types.AccountInfo{.{ .raw = &invalid_writable }};
+    const writable_data = instructionDiscriminator("needs_writable");
+    try expectProgramError(error.ImmutableAccount, dispatch(WritableValidationProgram, writable_accounts[0..], &writable_data));
+    try std.testing.expectEqual(@as(usize, 0), wrapper_validation_handler_calls);
+
+    var invalid_readonly = testAccount(25, false, true, false);
+    var readonly_accounts = [_]types.AccountInfo{.{ .raw = &invalid_readonly }};
+    const readonly_data = instructionDiscriminator("needs_readonly");
+    try expectProgramError(error.ImmutableAccount, dispatch(ReadonlyValidationProgram, readonly_accounts[0..], &readonly_data));
+    try std.testing.expectEqual(@as(usize, 0), wrapper_validation_handler_calls);
+
+    var invalid_program = testAccount(26, false, false, false);
+    var program_accounts = [_]types.AccountInfo{.{ .raw = &invalid_program }};
+    const program_data = instructionDiscriminator("needs_program");
+    try expectProgramError(error.InvalidArgument, dispatch(ProgramValidationProgram, program_accounts[0..], &program_data));
+    try std.testing.expectEqual(@as(usize, 0), wrapper_validation_handler_calls);
 }
 
 test "matching discriminator dispatches to exactly one handler" {
