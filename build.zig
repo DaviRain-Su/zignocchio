@@ -93,6 +93,13 @@ pub fn build(b: *std.Build) !void {
     addCompileFailFixture(
         b,
         test_step,
+        "readonly_account_no_mut_lamports",
+        "tests/compile_fail/readonly_account_no_mut_lamports.zig",
+        "tryBorrowMutLamports",
+    );
+    addCompileFailFixture(
+        b,
+        test_step,
         "signer_no_mut_data",
         "tests/compile_fail/signer_no_mut_data.zig",
         "tryBorrowMutData",
@@ -117,6 +124,13 @@ pub fn build(b: *std.Build) !void {
         "readonly_account_no_account_addr",
         "tests/compile_fail/readonly_account_no_account_addr.zig",
         "account_addr",
+    );
+    addCompileFailFixture(
+        b,
+        test_step,
+        "readonly_account_no_raw_account",
+        "tests/compile_fail/readonly_account_no_raw_account.zig",
+        "account",
     );
     addCompileFailFixture(
         b,
