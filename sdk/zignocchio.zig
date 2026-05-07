@@ -57,12 +57,15 @@
 //! }
 //! ```
 
+const std = @import("std");
+
 // Re-export all modules
 pub const errors = @import("errors.zig");
 pub const types = @import("types.zig");
 pub const syscalls = @import("syscalls.zig");
 pub const log = @import("log.zig");
 pub const entrypoint = @import("entrypoint.zig");
+pub const framework = @import("framework.zig");
 pub const allocator = @import("allocator.zig");
 pub const pda = @import("pda.zig");
 pub const cpi = @import("cpi.zig");
@@ -86,6 +89,15 @@ pub const AccountInfo = types.AccountInfo;
 pub const BorrowState = types.BorrowState;
 pub const Ref = types.Ref;
 pub const RefMut = types.RefMut;
+
+// Re-export the approved public framework aliases
+pub const exportProgram = framework.exportProgram;
+pub const Context = framework.Context;
+pub const instructionDiscriminator = framework.instructionDiscriminator;
+pub const Signer = framework.Signer;
+pub const WritableAccount = framework.WritableAccount;
+pub const ReadonlyAccount = framework.ReadonlyAccount;
+pub const ProgramAccount = framework.ProgramAccount;
 
 pub const PUBKEY_BYTES = types.PUBKEY_BYTES;
 pub const MAX_TX_ACCOUNTS = types.MAX_TX_ACCOUNTS;
@@ -135,4 +147,41 @@ pub fn createEntrypointWithMaxAccounts(
     comptime process_instruction: entrypoint.EntrypointFn,
 ) fn ([*]u8) callconv(.c) u64 {
     return entrypoint.entrypoint(max_accounts, process_instruction);
+}
+
+test "framework namespace and approved aliases are public" {
+    const hello = instructionDiscriminator("hello");
+    const framework_hello = framework.instructionDiscriminator("hello");
+    try std.testing.expectEqualSlices(u8, &hello, &framework_hello);
+
+    const EmptyAccounts = struct {};
+    try std.testing.expect(Context(EmptyAccounts) == framework.Context(EmptyAccounts));
+    try std.testing.expect(Signer == framework.Signer);
+    try std.testing.expect(WritableAccount == framework.WritableAccount);
+    try std.testing.expect(ReadonlyAccount == framework.ReadonlyAccount);
+    try std.testing.expect(ProgramAccount == framework.ProgramAccount);
+
+    const entry = comptime exportProgram(struct {
+        pub const Instruction = .{
+            .{
+                .name = "alias_check",
+                .accounts = EmptyAccounts,
+                .handler = struct {
+                    fn handle(_: Context(EmptyAccounts), _: []const u8) ProgramResult {
+                        return {};
+                    }
+                }.handle,
+            },
+        };
+    });
+    _ = entry;
+
+    // Existing low-level SDK exports remain available from the same import.
+    _ = AccountInfo;
+    _ = ProgramResult;
+    _ = Pubkey;
+    _ = guard;
+    _ = schema;
+    _ = invoke;
+    _ = createEntrypoint;
 }
