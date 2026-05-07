@@ -44,11 +44,7 @@ fn touchAccounts(
         return error.AccountDataTooSmall;
     }
 
-    var readonly_data = try accounts.readonly.tryBorrowData();
-    defer readonly_data.release();
-    var readonly_lamports = try accounts.readonly.tryBorrowLamports();
-    defer readonly_lamports.release();
-    if (readonly_lamports.value.* == 0) {
+    if (accounts.readonly.lamports() == 0) {
         return error.InsufficientFunds;
     }
 
@@ -60,7 +56,7 @@ fn touchAccounts(
     }
 
     writable_data.value[0] = 0xa5;
-    writable_data.value[1] = readonly_data.value[0];
+    writable_data.value[1] = if (accounts.readonly.dataLen() == 1) 0x11 else 0xff;
     writable_data.value[2] = accounts.raw.dataPtr()[0];
     writable_data.value[3] = if (accounts.signer.isSigner()) 1 else 0;
     writable_data.value[4] = if (accounts.program.executable()) 1 else 0;

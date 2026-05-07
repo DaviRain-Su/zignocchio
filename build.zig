@@ -135,6 +135,27 @@ pub fn build(b: *std.Build) !void {
     addCompileFailFixture(
         b,
         test_step,
+        "readonly_account_no_data_borrow",
+        "tests/compile_fail/readonly_account_no_data_borrow.zig",
+        "tryBorrowData",
+    );
+    addCompileFailFixture(
+        b,
+        test_step,
+        "readonly_account_no_lamports_borrow",
+        "tests/compile_fail/readonly_account_no_lamports_borrow.zig",
+        "tryBorrowLamports",
+    );
+    addCompileFailFixture(
+        b,
+        test_step,
+        "readonly_account_no_opaque_state",
+        "tests/compile_fail/readonly_account_no_opaque_state.zig",
+        "__zignocchio_opaque_state",
+    );
+    addCompileFailFixture(
+        b,
+        test_step,
         "readonly_account_no_lamports_ptr",
         "tests/compile_fail/readonly_account_no_lamports_ptr.zig",
         "lamports_ptr",

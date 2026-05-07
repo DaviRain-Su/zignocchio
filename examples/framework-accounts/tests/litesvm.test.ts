@@ -72,7 +72,7 @@ describe('framework account reflection litesvm integration', () => {
     expect(writableAfter).toBeDefined();
     expect(Array.from(writableAfter!.data.slice(0, 5))).toEqual([
       0xa5,
-      0x42,
+      0x11,
       0x24,
       1,
       1,
