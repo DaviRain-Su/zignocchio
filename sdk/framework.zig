@@ -34,6 +34,8 @@ const AccountWrapperKind = enum {
     program,
 };
 
+const ReadonlyAccountState = opaque {};
+
 /// Signed account declaration marker.
 pub const Signer = accountWrapper(.signer, null);
 
@@ -124,15 +126,17 @@ fn accountWrapper(comptime kind: AccountWrapperKind, comptime expected_program_i
             pub const zignocchio_framework_account_wrapper = kind;
             pub const zignocchio_framework_expected_program_id = expected_program_id;
 
+            __zignocchio_opaque_state: *const ReadonlyAccountState,
             key_value: types.Pubkey,
             owner_value: types.Pubkey,
             data_len: usize,
-            lamports_ptr: *const u64,
-            data_ptr: [*]const u8,
-            borrow_state: *u8,
             is_signer: bool,
             is_writable: bool,
             is_executable: bool,
+
+            fn accountInfo(self: @This()) types.AccountInfo {
+                return .{ .raw = @ptrCast(@alignCast(@constCast(self.__zignocchio_opaque_state))) };
+            }
 
             /// Access the account public key without exposing mutation-capable APIs.
             pub fn key(self: *const @This()) *const types.Pubkey {
@@ -166,41 +170,17 @@ fn accountWrapper(comptime kind: AccountWrapperKind, comptime expected_program_i
 
             /// Get the current lamport balance.
             pub fn lamports(self: @This()) u64 {
-                return self.lamports_ptr.*;
+                return self.accountInfo().lamports();
             }
 
-            /// Borrow account data immutably via the existing RAII borrow state.
+            /// Borrow account data immutably via the existing RAII API.
             pub fn tryBorrowData(self: @This()) errors.ProgramError!types.Ref([]const u8) {
-                if (self.borrow_state.* & 0b00001000 == 0) {
-                    return error.AccountBorrowFailed;
-                }
-                if (self.borrow_state.* & 0b00000111 == 0) {
-                    return error.AccountBorrowFailed;
-                }
-
-                self.borrow_state.* -= 1;
-                return .{
-                    .value = self.data_ptr[0..self.data_len],
-                    .state = self.borrow_state,
-                    .borrow_shift = 0,
-                };
+                return self.accountInfo().tryBorrowData();
             }
 
-            /// Borrow lamports immutably via the existing RAII borrow state.
+            /// Borrow lamports immutably via the existing RAII API.
             pub fn tryBorrowLamports(self: @This()) errors.ProgramError!types.Ref(*const u64) {
-                if (self.borrow_state.* & 0b10000000 == 0) {
-                    return error.AccountBorrowFailed;
-                }
-                if (self.borrow_state.* & 0b01110000 == 0) {
-                    return error.AccountBorrowFailed;
-                }
-
-                self.borrow_state.* -= @as(u8, 1) << @as(u3, 4);
-                return .{
-                    .value = self.lamports_ptr,
-                    .state = self.borrow_state,
-                    .borrow_shift = 4,
-                };
+                return self.accountInfo().tryBorrowLamports();
             }
         };
     }
@@ -721,12 +701,10 @@ fn bindAccountField(comptime Field: type, account: types.AccountInfo) errors.Pro
 
     if (kind == .readonly) {
         return .{
+            .__zignocchio_opaque_state = @ptrCast(account.raw),
             .key_value = account.key().*,
             .owner_value = account.owner().*,
             .data_len = account.dataLen(),
-            .lamports_ptr = account.borrowLamportsUnchecked(),
-            .data_ptr = account.borrowDataUnchecked().ptr,
-            .borrow_state = @as(*u8, @ptrCast(&account.raw.borrow_state)),
             .is_signer = account.isSigner(),
             .is_writable = account.isWritable(),
             .is_executable = account.executable(),
@@ -1413,6 +1391,9 @@ test "ReadonlyAccount rejects writable inputs and exposes immutable borrows only
     try std.testing.expect(!@hasField(ReadonlyAccount, "account"));
     try std.testing.expect(!@hasField(ReadonlyAccount, "raw"));
     try std.testing.expect(!@hasField(ReadonlyAccount, "account_addr"));
+    try std.testing.expect(!@hasField(ReadonlyAccount, "lamports_ptr"));
+    try std.testing.expect(!@hasField(ReadonlyAccount, "data_ptr"));
+    try std.testing.expect(!@hasField(ReadonlyAccount, "borrow_state"));
 
     var data_ref = try readonly.tryBorrowData();
     try std.testing.expectEqual(@as(u8, 0), data_ref.value[0]);

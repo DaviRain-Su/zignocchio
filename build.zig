@@ -135,6 +135,27 @@ pub fn build(b: *std.Build) !void {
     addCompileFailFixture(
         b,
         test_step,
+        "readonly_account_no_lamports_ptr",
+        "tests/compile_fail/readonly_account_no_lamports_ptr.zig",
+        "lamports_ptr",
+    );
+    addCompileFailFixture(
+        b,
+        test_step,
+        "readonly_account_no_data_ptr",
+        "tests/compile_fail/readonly_account_no_data_ptr.zig",
+        "data_ptr",
+    );
+    addCompileFailFixture(
+        b,
+        test_step,
+        "readonly_account_no_borrow_state",
+        "tests/compile_fail/readonly_account_no_borrow_state.zig",
+        "borrow_state",
+    );
+    addCompileFailFixture(
+        b,
+        test_step,
         "program_account_no_account_addr",
         "tests/compile_fail/program_account_no_account_addr.zig",
         "account_addr",
