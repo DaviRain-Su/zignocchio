@@ -29,8 +29,72 @@ pub const ReadonlyAccount = accountWrapper(.readonly);
 pub const ProgramAccount = accountWrapper(.program);
 
 fn accountWrapper(comptime kind: AccountWrapperKind) type {
+    if (kind == .writable) {
+        return struct {
+            pub const zignocchio_framework_account_wrapper = kind;
+
+            account: types.AccountInfo,
+
+            /// Access the account public key.
+            pub fn key(self: @This()) *const types.Pubkey {
+                return self.account.key();
+            }
+
+            /// Access the account owner.
+            pub fn owner(self: @This()) *const types.Pubkey {
+                return self.account.owner();
+            }
+
+            /// Observe whether the account signed the transaction.
+            pub fn isSigner(self: @This()) bool {
+                return self.account.isSigner();
+            }
+
+            /// Observe whether the account was marked writable.
+            pub fn isWritable(self: @This()) bool {
+                return self.account.isWritable();
+            }
+
+            /// Observe whether the account is executable.
+            pub fn executable(self: @This()) bool {
+                return self.account.executable();
+            }
+        };
+    }
+
     return struct {
         pub const zignocchio_framework_account_wrapper = kind;
+
+        key_ptr: *const types.Pubkey,
+        owner_ptr: *const types.Pubkey,
+        is_signer: bool,
+        is_writable: bool,
+        is_executable: bool,
+
+        /// Access the account public key without exposing mutation-capable APIs.
+        pub fn key(self: @This()) *const types.Pubkey {
+            return self.key_ptr;
+        }
+
+        /// Access the account owner without exposing mutation-capable APIs.
+        pub fn owner(self: @This()) *const types.Pubkey {
+            return self.owner_ptr;
+        }
+
+        /// Observe whether the account signed the transaction.
+        pub fn isSigner(self: @This()) bool {
+            return self.is_signer;
+        }
+
+        /// Observe whether the account was marked writable.
+        pub fn isWritable(self: @This()) bool {
+            return self.is_writable;
+        }
+
+        /// Observe whether the account is executable.
+        pub fn executable(self: @This()) bool {
+            return self.is_executable;
+        }
     };
 }
 
@@ -40,6 +104,9 @@ pub fn Context(comptime Accounts: type) type {
 
     return struct {
         pub const AccountsType = Accounts;
+
+        /// Reflected runtime accounts bound in the Accounts declaration order.
+        accounts: Accounts,
     };
 }
 
@@ -268,10 +335,46 @@ fn buildContext(comptime Accounts: type, accounts: []types.AccountInfo) errors.P
         return error.NotEnoughAccountKeys;
     }
 
-    // Full reflected account binding is implemented by the account reflection
-    // feature. The foundation dispatch layer needs a constructible context so
-    // no-account programs such as hello can route through generated dispatch.
-    return .{};
+    var bound: Accounts = undefined;
+    inline for (fields, 0..) |field, account_index| {
+        @field(bound, field.name) = try bindAccountField(field.type, accounts[account_index]);
+    }
+
+    return .{ .accounts = bound };
+}
+
+fn bindAccountField(comptime Field: type, account: types.AccountInfo) errors.ProgramError!Field {
+    if (Field == types.AccountInfo) {
+        return account;
+    }
+
+    const kind = comptime accountWrapperKind(Field) orelse
+        @compileError("unsupported account field type `" ++ @typeName(Field) ++ "`");
+
+    switch (kind) {
+        .signer => if (!account.isSigner()) {
+            return error.MissingRequiredSignature;
+        },
+        .writable => if (!account.isWritable()) {
+            return error.ImmutableAccount;
+        },
+        .readonly => {},
+        .program => if (!account.executable()) {
+            return error.InvalidArgument;
+        },
+    }
+
+    if (kind == .writable) {
+        return .{ .account = account };
+    }
+
+    return .{
+        .key_ptr = account.key(),
+        .owner_ptr = account.owner(),
+        .is_signer = account.isSigner(),
+        .is_writable = account.isWritable(),
+        .is_executable = account.executable(),
+    };
 }
 
 fn instructionAllowsEmpty(comptime instruction: anytype) bool {
@@ -290,18 +393,39 @@ fn validateAccountsType(comptime Accounts: type) void {
             }
 
             inline for (struct_info.fields) |field| {
-                if (!isSupportedAccountField(field.type)) {
-                    @compileError("unsupported account field type `" ++ @typeName(field.type) ++ "` in `" ++ @typeName(Accounts) ++ "`");
+                if (field.is_comptime) {
+                    @compileError("unsupported comptime account field `" ++ field.name ++ "` in `" ++ @typeName(Accounts) ++ "`");
                 }
+                validateAccountFieldType(field.type, Accounts);
             }
         },
         else => @compileError("Context requires a struct Accounts type"),
     }
 }
 
-fn isSupportedAccountField(comptime Field: type) bool {
-    if (Field == types.AccountInfo) return true;
-    return @hasDecl(Field, "zignocchio_framework_account_wrapper");
+fn validateAccountFieldType(comptime Field: type, comptime Accounts: type) void {
+    if (Field == types.AccountInfo) return;
+    if (accountWrapperKind(Field) != null) return;
+
+    @compileError("unsupported account field type `" ++ @typeName(Field) ++ "` in `" ++ @typeName(Accounts) ++ "`");
+}
+
+fn accountWrapperKind(comptime Field: type) ?AccountWrapperKind {
+    switch (@typeInfo(Field)) {
+        .@"struct", .@"enum", .@"union", .@"opaque" => {},
+        else => return null,
+    }
+
+    if (!@hasDecl(Field, "zignocchio_framework_account_wrapper")) {
+        return null;
+    }
+
+    const marker = Field.zignocchio_framework_account_wrapper;
+    if (@TypeOf(marker) != AccountWrapperKind) {
+        @compileError("invalid account wrapper declaration `" ++ @typeName(Field) ++ "`; use sdk.Signer, sdk.WritableAccount, sdk.ReadonlyAccount, or sdk.ProgramAccount");
+    }
+
+    return marker;
 }
 
 fn validateHandler(comptime handler: anytype, comptime Accounts: type) void {
@@ -395,6 +519,24 @@ fn expectProgramError(comptime expected: anyerror, result: errors.ProgramResult)
     }
 }
 
+fn testAccount(comptime key_byte: u8, comptime is_signer: bool, comptime is_writable: bool, comptime is_executable: bool) types.Account {
+    return .{
+        .borrow_state = types.NON_DUP_MARKER,
+        .is_signer = if (is_signer) 1 else 0,
+        .is_writable = if (is_writable) 1 else 0,
+        .executable = if (is_executable) 1 else 0,
+        .resize_delta = 0,
+        .key = .{key_byte} ** 32,
+        .owner = .{0x42} ** 32,
+        .lamports = 0,
+        .data_len = 0,
+    };
+}
+
+fn expectAccountKeyByte(account: types.AccountInfo, expected: u8) !void {
+    try std.testing.expectEqual(expected, account.key()[0]);
+}
+
 const MinimalProgram = struct {
     pub const Instruction = .{
         .{
@@ -437,6 +579,28 @@ const ErrorProgram = struct {
             .name = "fail",
             .accounts = EmptyAccounts,
             .handler = observedErrorHandler,
+        },
+    };
+};
+
+const NeedsSignerAccounts = struct {
+    signer: Signer,
+    raw: types.AccountInfo,
+};
+
+var account_context_handler_calls: usize = 0;
+
+fn accountContextHandler(_: Context(NeedsSignerAccounts), _: []const u8) errors.ProgramResult {
+    account_context_handler_calls += 1;
+    return {};
+}
+
+const AccountContextProgram = struct {
+    pub const Instruction = .{
+        .{
+            .name = "needs_signer",
+            .accounts = NeedsSignerAccounts,
+            .handler = accountContextHandler,
         },
     };
 };
@@ -493,6 +657,110 @@ test "Context accepts first public account wrapper declarations" {
 
     const Ctx = Context(Accounts);
     try std.testing.expect(Ctx.AccountsType == Accounts);
+}
+
+test "Context binds plain account fields in declaration order" {
+    const Accounts = struct {
+        zed_name_first: types.AccountInfo,
+        alpha_name_second: types.AccountInfo,
+        middle_name_third: types.AccountInfo,
+    };
+
+    var raw0 = testAccount(1, false, false, false);
+    var raw1 = testAccount(2, false, false, false);
+    var raw2 = testAccount(3, false, false, false);
+    var runtime_accounts = [_]types.AccountInfo{
+        .{ .raw = &raw0 },
+        .{ .raw = &raw1 },
+        .{ .raw = &raw2 },
+    };
+
+    const ctx = try buildContext(Accounts, runtime_accounts[0..]);
+
+    try expectAccountKeyByte(ctx.accounts.zed_name_first, 1);
+    try expectAccountKeyByte(ctx.accounts.alpha_name_second, 2);
+    try expectAccountKeyByte(ctx.accounts.middle_name_third, 3);
+}
+
+test "Context ignores surplus accounts after binding declared fields" {
+    const Accounts = struct {
+        declared: types.AccountInfo,
+    };
+
+    var raw0 = testAccount(4, false, false, false);
+    var raw1 = testAccount(5, false, false, false);
+    var runtime_accounts = [_]types.AccountInfo{
+        .{ .raw = &raw0 },
+        .{ .raw = &raw1 },
+    };
+
+    const ctx = try buildContext(Accounts, runtime_accounts[0..]);
+
+    try expectAccountKeyByte(ctx.accounts.declared, 4);
+}
+
+test "Context empty accounts accepts zero and surplus runtime accounts" {
+    var no_accounts: [0]types.AccountInfo = .{};
+    const empty_ctx = try buildContext(EmptyAccounts, no_accounts[0..]);
+    _ = empty_ctx.accounts;
+
+    var raw0 = testAccount(6, false, false, false);
+    var runtime_accounts = [_]types.AccountInfo{.{ .raw = &raw0 }};
+    const surplus_ctx = try buildContext(EmptyAccounts, runtime_accounts[0..]);
+    _ = surplus_ctx.accounts;
+}
+
+test "Context checks account count before wrapper validation and handler execution" {
+    account_context_handler_calls = 0;
+    var raw0 = testAccount(7, false, false, false);
+    var underfilled_accounts = [_]types.AccountInfo{.{ .raw = &raw0 }};
+    const data = instructionDiscriminator("needs_signer");
+
+    try expectProgramError(error.NotEnoughAccountKeys, dispatch(AccountContextProgram, underfilled_accounts[0..], &data));
+
+    try std.testing.expectEqual(@as(usize, 0), account_context_handler_calls);
+}
+
+test "Context wrapper validation runs before handler execution" {
+    account_context_handler_calls = 0;
+    var raw0 = testAccount(8, false, false, false);
+    var raw1 = testAccount(9, false, false, false);
+    var runtime_accounts = [_]types.AccountInfo{
+        .{ .raw = &raw0 },
+        .{ .raw = &raw1 },
+    };
+    const data = instructionDiscriminator("needs_signer");
+
+    try expectProgramError(error.MissingRequiredSignature, dispatch(AccountContextProgram, runtime_accounts[0..], &data));
+
+    try std.testing.expectEqual(@as(usize, 0), account_context_handler_calls);
+}
+
+test "Context binds wrapper fields to their ordinal accounts after validation" {
+    const Accounts = struct {
+        signer: Signer,
+        writable: WritableAccount,
+        readonly: ReadonlyAccount,
+        program: ProgramAccount,
+    };
+
+    var raw0 = testAccount(10, true, false, false);
+    var raw1 = testAccount(11, false, true, false);
+    var raw2 = testAccount(12, false, true, false);
+    var raw3 = testAccount(13, false, false, true);
+    var runtime_accounts = [_]types.AccountInfo{
+        .{ .raw = &raw0 },
+        .{ .raw = &raw1 },
+        .{ .raw = &raw2 },
+        .{ .raw = &raw3 },
+    };
+
+    const ctx = try buildContext(Accounts, runtime_accounts[0..]);
+
+    try std.testing.expectEqual(@as(u8, 10), ctx.accounts.signer.key()[0]);
+    try std.testing.expectEqual(@as(u8, 11), ctx.accounts.writable.key()[0]);
+    try std.testing.expectEqual(@as(u8, 12), ctx.accounts.readonly.key()[0]);
+    try std.testing.expectEqual(@as(u8, 13), ctx.accounts.program.key()[0]);
 }
 
 test "matching discriminator dispatches to exactly one handler" {

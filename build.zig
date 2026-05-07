@@ -53,23 +53,34 @@ pub fn build(b: *std.Build) !void {
     const run_unit_tests = b.addRunArtifact(lib_unit_tests);
     test_step.dependOn(&run_unit_tests.step);
 
-    const lowercase_instruction_compile_fail = b.addSystemCommand(&.{
-        "sh",
-        "-c",
-        \\set -eu
-        \\err=".zig-cache/framework_lowercase_instructions.err"
-        \\mkdir -p ".zig-cache"
-        \\rm -f "$err"
-        \\if zig build-obj -fno-emit-bin --dep sdk -Mroot=tests/compile_fail/framework_lowercase_instructions.zig -Msdk=sdk/zignocchio.zig 2>"$err"; then
-        \\  echo "expected lowercase-only framework Program fixture to fail compilation" >&2
-        \\  exit 1
-        \\fi
-        \\if ! rg -F 'framework Program declaration is missing `Instruction` declaration' "$err" >/dev/null; then
-        \\  cat "$err" >&2
-        \\  exit 1
-        \\fi
-    });
-    test_step.dependOn(&lowercase_instruction_compile_fail.step);
+    addCompileFailFixture(
+        b,
+        test_step,
+        "framework_lowercase_instructions",
+        "tests/compile_fail/framework_lowercase_instructions.zig",
+        "framework Program declaration is missing `Instruction` declaration",
+    );
+    addCompileFailFixture(
+        b,
+        test_step,
+        "context_non_struct_accounts",
+        "tests/compile_fail/context_non_struct_accounts.zig",
+        "Context requires a struct Accounts type",
+    );
+    addCompileFailFixture(
+        b,
+        test_step,
+        "context_unsupported_field_type",
+        "tests/compile_fail/context_unsupported_field_type.zig",
+        "unsupported account field type `u64`",
+    );
+    addCompileFailFixture(
+        b,
+        test_step,
+        "context_invalid_wrapper_declaration",
+        "tests/compile_fail/context_invalid_wrapper_declaration.zig",
+        "invalid account wrapper declaration",
+    );
 
     // Keep representative low-level examples build-safe as part of the normal
     // Zig validator. Each regression build uses its own bitcode path so
@@ -79,6 +90,40 @@ pub fn build(b: *std.Build) !void {
         const regression_build = addExampleProgram(b, regression_example, regression_bitcode);
         test_step.dependOn(&regression_build.step);
     }
+}
+
+fn addCompileFailFixture(
+    b: *std.Build,
+    test_step: *std.Build.Step,
+    name: []const u8,
+    path: []const u8,
+    diagnostic: []const u8,
+) void {
+    const compile_fail = b.addSystemCommand(&.{
+        "sh",
+        "-c",
+        \\set -eu
+        \\name="$1"
+        \\path="$2"
+        \\diagnostic="$3"
+        \\err=".zig-cache/${name}.err"
+        \\mkdir -p ".zig-cache"
+        \\rm -f "$err"
+        \\if zig build-obj -fno-emit-bin --dep sdk -Mroot="$path" -Msdk=sdk/zignocchio.zig 2>"$err"; then
+        \\  echo "expected $path to fail compilation" >&2
+        \\  exit 1
+        \\fi
+        \\if ! rg -F "$diagnostic" "$err" >/dev/null; then
+        \\  cat "$err" >&2
+        \\  exit 1
+        \\fi
+        ,
+        "compile-fail",
+        name,
+        path,
+        diagnostic,
+    });
+    test_step.dependOn(&compile_fail.step);
 }
 
 fn addExampleProgram(
