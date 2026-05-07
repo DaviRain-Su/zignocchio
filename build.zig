@@ -53,6 +53,24 @@ pub fn build(b: *std.Build) !void {
     const run_unit_tests = b.addRunArtifact(lib_unit_tests);
     test_step.dependOn(&run_unit_tests.step);
 
+    const lowercase_instruction_compile_fail = b.addSystemCommand(&.{
+        "sh",
+        "-c",
+        \\set -eu
+        \\err=".zig-cache/framework_lowercase_instructions.err"
+        \\mkdir -p ".zig-cache"
+        \\rm -f "$err"
+        \\if zig build-obj -fno-emit-bin --dep sdk -Mroot=tests/compile_fail/framework_lowercase_instructions.zig -Msdk=sdk/zignocchio.zig 2>"$err"; then
+        \\  echo "expected lowercase-only framework Program fixture to fail compilation" >&2
+        \\  exit 1
+        \\fi
+        \\if ! rg -F 'framework Program declaration is missing `Instruction` declaration' "$err" >/dev/null; then
+        \\  cat "$err" >&2
+        \\  exit 1
+        \\fi
+    });
+    test_step.dependOn(&lowercase_instruction_compile_fail.step);
+
     // Keep representative low-level examples build-safe as part of the normal
     // Zig validator. Each regression build uses its own bitcode path so
     // parallel test execution cannot race on the default entrypoint.bc.

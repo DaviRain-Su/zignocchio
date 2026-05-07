@@ -91,10 +91,7 @@ pub fn dispatch(
 ) errors.ProgramResult {
     validateProgram(Program);
 
-    const instructions = if (@hasDecl(Program, "Instruction"))
-        Program.Instruction
-    else
-        Program.instructions;
+    const instructions = Program.Instruction;
 
     return dispatchInstructions(instructions, accounts, instruction_data);
 }
@@ -107,8 +104,6 @@ fn validateProgram(comptime Program: type) void {
 
     const instructions = if (@hasDecl(Program, "Instruction"))
         Program.Instruction
-    else if (@hasDecl(Program, "instructions"))
-        Program.instructions
     else
         @compileError("framework Program declaration is missing `Instruction` declaration");
 
@@ -362,10 +357,6 @@ fn helloHandler(_: Context(EmptyAccounts), _: []const u8) errors.ProgramResult {
     return {};
 }
 
-fn initializeHandler(_: Context(EmptyAccounts), _: []const u8) errors.ProgramResult {
-    return {};
-}
-
 var observed_handler: enum { none, hello, initialize, error_handler } = .none;
 var observed_calls: usize = 0;
 var observed_args_len: usize = 0;
@@ -450,16 +441,6 @@ const ErrorProgram = struct {
     };
 };
 
-const LowercaseInitializeProgram = struct {
-    pub const instructions = .{
-        .{
-            .name = "initialize",
-            .accounts = EmptyAccounts,
-            .handler = initializeHandler,
-        },
-    };
-};
-
 test "instructionDiscriminator matches Anchor known vectors" {
     try std.testing.expectEqualSlices(u8, &[_]u8{ 0x95, 0x76, 0x3b, 0xdc, 0xc4, 0x7f, 0xa1, 0xb3 }, &instructionDiscriminator("hello"));
     try std.testing.expectEqualSlices(u8, &[_]u8{ 0xaf, 0xaf, 0x6d, 0x1f, 0x0d, 0x98, 0x9b, 0xed }, &instructionDiscriminator("initialize"));
@@ -496,7 +477,6 @@ test "instructionDiscriminator preserves exact public instruction names" {
 
 test "minimal public Program declarations compile" {
     comptime validateProgram(MinimalProgram);
-    comptime validateProgram(LowercaseInitializeProgram);
 
     const entry = comptime exportProgram(MinimalProgram);
     _ = entry;
