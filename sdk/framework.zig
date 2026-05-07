@@ -482,7 +482,7 @@ fn validateAccountsType(comptime Accounts: type) void {
 
 fn validateAccountFieldType(comptime Field: type, comptime Accounts: type) void {
     if (Field == types.AccountInfo) return;
-    if (accountWrapperKind(Field) != null) return;
+    if (comptime accountWrapperKind(Field)) |_| return;
 
     @compileError("unsupported account field type `" ++ @typeName(Field) ++ "` in `" ++ @typeName(Accounts) ++ "`");
 }
@@ -844,6 +844,65 @@ test "Context binds plain account fields in declaration order" {
     try expectAccountKeyByte(ctx.accounts.zed_name_first, 1);
     try expectAccountKeyByte(ctx.accounts.alpha_name_second, 2);
     try expectAccountKeyByte(ctx.accounts.middle_name_third, 3);
+}
+
+test "Context binds raw AccountInfo without wrapper validation" {
+    const Accounts = struct {
+        raw: types.AccountInfo,
+    };
+
+    var backing = testAccountWithData(27, false, false, false);
+    var runtime_accounts = [_]types.AccountInfo{.{ .raw = &backing.account }};
+
+    const ctx = try buildContext(Accounts, runtime_accounts[0..]);
+
+    try std.testing.expectEqual(@intFromPtr(runtime_accounts[0].raw), @intFromPtr(ctx.accounts.raw.raw));
+    try std.testing.expectEqual(@as(u8, 27), ctx.accounts.raw.key()[0]);
+    try std.testing.expect(!ctx.accounts.raw.isSigner());
+    try std.testing.expect(!ctx.accounts.raw.isWritable());
+    try std.testing.expect(!ctx.accounts.raw.executable());
+
+    var data_ref = try ctx.accounts.raw.tryBorrowMutData();
+    data_ref.value[0] = 0xee;
+    try std.testing.expectError(error.AccountBorrowFailed, runtime_accounts[0].tryBorrowData());
+    data_ref.release();
+
+    var read_after_release = try runtime_accounts[0].tryBorrowData();
+    try std.testing.expectEqual(@as(u8, 0xee), read_after_release.value[0]);
+    read_after_release.release();
+}
+
+test "duplicate reflected account aliases preserve shared borrow state" {
+    const Accounts = struct {
+        first: WritableAccount,
+        second: WritableAccount,
+        raw_alias: types.AccountInfo,
+    };
+
+    var backing = testAccountWithData(28, false, true, false);
+    var runtime_accounts = [_]types.AccountInfo{
+        .{ .raw = &backing.account },
+        .{ .raw = &backing.account },
+        .{ .raw = &backing.account },
+    };
+
+    const ctx = try buildContext(Accounts, runtime_accounts[0..]);
+
+    var first_data = try ctx.accounts.first.tryBorrowMutData();
+    first_data.value[1] = 0xab;
+    try std.testing.expectError(error.AccountBorrowFailed, ctx.accounts.second.tryBorrowMutData());
+    try std.testing.expectError(error.AccountBorrowFailed, ctx.accounts.raw_alias.tryBorrowData());
+    first_data.release();
+
+    var second_data = try ctx.accounts.second.tryBorrowMutData();
+    try std.testing.expectEqual(@as(u8, 0xab), second_data.value[1]);
+    second_data.value[2] = 0xcd;
+    try std.testing.expectError(error.AccountBorrowFailed, ctx.accounts.first.tryBorrowMutData());
+    second_data.release();
+
+    var raw_read = try ctx.accounts.raw_alias.tryBorrowData();
+    try std.testing.expectEqual(@as(u8, 0xcd), raw_read.value[2]);
+    raw_read.release();
 }
 
 test "Context ignores surplus accounts after binding declared fields" {

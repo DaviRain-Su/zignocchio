@@ -317,7 +317,7 @@ pub fn Ref(comptime T: type) type {
         /// Release the borrow
         pub fn release(self: *Self) void {
             // Increment borrow count back
-            self.state.* += 1 << self.borrow_shift;
+            self.state.* += @as(u8, 1) << @as(u3, @intCast(self.borrow_shift));
         }
     };
 }
