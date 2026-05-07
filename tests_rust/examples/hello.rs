@@ -34,8 +34,12 @@ fn setup_mollusk() -> Mollusk {
     mollusk
 }
 
+fn hello_discriminator() -> Vec<u8> {
+    vec![0x95, 0x76, 0x3b, 0xdc, 0xc4, 0x7f, 0xa1, 0xb3]
+}
+
 #[test]
-fn test_hello_executes_successfully() {
+fn test_hello_empty_data_executes_successfully() {
     let mollusk = setup_mollusk();
 
     let ix = Instruction {
@@ -48,6 +52,24 @@ fn test_hello_executes_successfully() {
     assert!(
         !result.program_result.is_err(),
         "hello should succeed: {:?}",
+        result.program_result
+    );
+}
+
+#[test]
+fn test_hello_discriminator_executes_successfully() {
+    let mollusk = setup_mollusk();
+
+    let ix = Instruction {
+        program_id: program_id(),
+        accounts: vec![],
+        data: hello_discriminator(),
+    };
+
+    let result = mollusk.process_instruction(&ix, &[]);
+    assert!(
+        !result.program_result.is_err(),
+        "hello discriminator path should succeed: {:?}",
         result.program_result
     );
 }

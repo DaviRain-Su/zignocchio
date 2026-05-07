@@ -9,6 +9,15 @@ import {
 import { execSync, spawn, ChildProcess } from 'child_process';
 import * as fs from 'fs';
 import * as path from 'path';
+import { createHash } from 'crypto';
+
+function instructionDiscriminator(name: string): Buffer {
+  return createHash('sha256').update(`global:${name}`).digest().subarray(0, 8);
+}
+
+async function sleep(ms: number): Promise<void> {
+  await new Promise(resolve => setTimeout(resolve, ms));
+}
 
 describe('Hello World Program', () => {
   let validator: ChildProcess;
@@ -17,16 +26,6 @@ describe('Hello World Program', () => {
   let payer: Keypair;
 
   beforeAll(async () => {
-    // Kill any existing surfpool
-    try {
-      execSync('pkill -f surfpool', { stdio: 'ignore' });
-    } catch (e) {
-      // Ignore if no process found
-    }
-
-    // Wait a bit for cleanup
-    await new Promise(resolve => setTimeout(resolve, 2000));
-
     // Build the hello program
     console.log('Building hello program...');
     execSync('zig build -Dexample=hello', { stdio: 'inherit' });
@@ -72,7 +71,7 @@ describe('Hello World Program', () => {
     validator.unref();
 
     // Wait for validator to be ready
-    await new Promise(resolve => setTimeout(resolve, 5000));
+    await sleep(5000);
 
     // Connect to test validator
     connection = new Connection('http://localhost:8899', 'confirmed');
@@ -124,7 +123,7 @@ describe('Hello World Program', () => {
         console.log('Program deployed successfully!');
         break;
       }
-      await new Promise(resolve => setTimeout(resolve, 500));
+      await sleep(500);
     }
 
     if (!programReady) {
@@ -133,11 +132,31 @@ describe('Hello World Program', () => {
   }, 60000); // 60 second timeout
 
   afterAll(async () => {
-    // Stop surfpool
-    try {
-      execSync('pkill -f surfpool');
-    } catch (e) {
-      // Ignore errors
+    // Stop only the surfpool process group started by this test.
+    if (validator?.pid) {
+      try {
+        process.kill(-validator.pid, 'SIGTERM');
+      } catch (groupError) {
+        try {
+          validator.kill('SIGTERM');
+        } catch (childError) {
+          // Ignore if the process has already exited.
+        }
+      }
+
+      await sleep(1000);
+
+      if (!validator.killed) {
+        try {
+          process.kill(-validator.pid, 'SIGKILL');
+        } catch (groupError) {
+          try {
+            validator.kill('SIGKILL');
+          } catch (childError) {
+            // Ignore if the process has already exited.
+          }
+        }
+      }
     }
 
     // Clean up temp keypair file
@@ -148,8 +167,8 @@ describe('Hello World Program', () => {
     }
   });
 
-  it('should execute and log "Hello from Zignocchio!"', async () => {
-    // Create instruction - empty data
+  it('should execute and log "Hello from Zignocchio!" with legacy empty data', async () => {
+    // Create instruction - empty data compatibility path
     const instruction = new TransactionInstruction({
       keys: [],
       programId,
@@ -182,6 +201,41 @@ describe('Hello World Program', () => {
     console.log('Transaction logs:', logs);
 
     // Check for "Hello from Zignocchio!" in logs
+    const hasMessage = logs.some(log =>
+      log.includes('Hello from Zignocchio!')
+    );
+
+    expect(hasMessage).toBe(true);
+  });
+
+  it('should execute and log "Hello from Zignocchio!" with the framework discriminator', async () => {
+    const instruction = new TransactionInstruction({
+      keys: [],
+      programId,
+      data: instructionDiscriminator('hello'),
+    });
+
+    const transaction = new Transaction().add(instruction);
+
+    console.log('Sending discriminator transaction...');
+    const signature = await sendAndConfirmTransaction(
+      connection,
+      transaction,
+      [payer],
+      { commitment: 'confirmed' }
+    );
+
+    const txDetails = await connection.getTransaction(signature, {
+      commitment: 'confirmed',
+      maxSupportedTransactionVersion: 0,
+    });
+
+    expect(txDetails).not.toBeNull();
+    expect(txDetails?.meta?.logMessages).toBeDefined();
+
+    const logs = txDetails?.meta?.logMessages || [];
+    console.log('Discriminator transaction logs:', logs);
+
     const hasMessage = logs.some(log =>
       log.includes('Hello from Zignocchio!')
     );
