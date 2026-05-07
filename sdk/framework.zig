@@ -105,26 +105,22 @@ fn accountWrapper(comptime kind: AccountWrapperKind, comptime expected_program_i
         pub const zignocchio_framework_account_wrapper = kind;
         pub const zignocchio_framework_expected_program_id = expected_program_id;
 
-        account_addr: usize,
-        key_ptr: *const types.Pubkey,
-        owner_ptr: *const types.Pubkey,
+        key_value: types.Pubkey,
+        owner_value: types.Pubkey,
+        data_len: usize,
+        lamports_value: u64,
         is_signer: bool,
         is_writable: bool,
         is_executable: bool,
 
-        fn accountInfo(self: @This()) types.AccountInfo {
-            const raw: *types.Account = @ptrFromInt(self.account_addr);
-            return .{ .raw = raw };
-        }
-
         /// Access the account public key without exposing mutation-capable APIs.
-        pub fn key(self: @This()) *const types.Pubkey {
-            return self.key_ptr;
+        pub fn key(self: *const @This()) *const types.Pubkey {
+            return &self.key_value;
         }
 
         /// Access the account owner without exposing mutation-capable APIs.
-        pub fn owner(self: @This()) *const types.Pubkey {
-            return self.owner_ptr;
+        pub fn owner(self: *const @This()) *const types.Pubkey {
+            return &self.owner_value;
         }
 
         /// Observe whether the account signed the transaction.
@@ -144,22 +140,12 @@ fn accountWrapper(comptime kind: AccountWrapperKind, comptime expected_program_i
 
         /// Get the current account data length.
         pub fn dataLen(self: @This()) usize {
-            return self.accountInfo().dataLen();
+            return self.data_len;
         }
 
         /// Get the current lamport balance.
         pub fn lamports(self: @This()) u64 {
-            return self.accountInfo().lamports();
-        }
-
-        /// Borrow account data immutably via the existing RAII API.
-        pub fn tryBorrowData(self: @This()) errors.ProgramError!types.Ref([]const u8) {
-            return self.accountInfo().tryBorrowData();
-        }
-
-        /// Borrow lamports immutably via the existing RAII API.
-        pub fn tryBorrowLamports(self: @This()) errors.ProgramError!types.Ref(*const u64) {
-            return self.accountInfo().tryBorrowLamports();
+            return self.lamports_value;
         }
     };
 }
@@ -445,9 +431,10 @@ fn bindAccountField(comptime Field: type, account: types.AccountInfo) errors.Pro
     }
 
     return .{
-        .account_addr = @intFromPtr(account.raw),
-        .key_ptr = account.key(),
-        .owner_ptr = account.owner(),
+        .key_value = account.key().*,
+        .owner_value = account.owner().*,
+        .data_len = account.dataLen(),
+        .lamports_value = account.lamports(),
         .is_signer = account.isSigner(),
         .is_writable = account.isWritable(),
         .is_executable = account.executable(),
@@ -998,16 +985,13 @@ test "Signer validates signatures and exposes readonly-safe accessors" {
     try std.testing.expectEqual(@as(usize, 8), signer.dataLen());
     try std.testing.expectEqual(@as(u64, 123), signer.lamports());
 
-    var data_ref = try signer.tryBorrowData();
-    try std.testing.expectEqual(@as(u8, 0), data_ref.value[0]);
-    data_ref.release();
-
-    var lamports_ref = try signer.tryBorrowLamports();
-    try std.testing.expectEqual(@as(u64, 123), lamports_ref.value.*);
-    lamports_ref.release();
-
+    try std.testing.expect(!@hasDecl(Signer, "tryBorrowData"));
+    try std.testing.expect(!@hasDecl(Signer, "tryBorrowLamports"));
     try std.testing.expect(!@hasDecl(Signer, "tryBorrowMutData"));
     try std.testing.expect(!@hasDecl(Signer, "tryBorrowMutLamports"));
+    try std.testing.expect(!@hasField(Signer, "account"));
+    try std.testing.expect(!@hasField(Signer, "raw"));
+    try std.testing.expect(!@hasField(Signer, "account_addr"));
 
     var not_signer = testAccount(15, false, false, false);
     try std.testing.expectError(error.MissingRequiredSignature, bindAccountField(Signer, .{ .raw = &not_signer }));
@@ -1041,7 +1025,7 @@ test "WritableAccount validates writable and delegates mutable borrows" {
     try std.testing.expectError(error.ImmutableAccount, bindAccountField(WritableAccount, .{ .raw = &not_writable }));
 }
 
-test "ReadonlyAccount rejects writable inputs and exposes immutable borrows only" {
+test "ReadonlyAccount rejects writable inputs and exposes immutable metadata only" {
     var backing = testAccountWithData(18, false, false, false);
     const readonly = try bindAccountField(ReadonlyAccount, .{ .raw = &backing.account });
 
@@ -1050,17 +1034,13 @@ test "ReadonlyAccount rejects writable inputs and exposes immutable borrows only
     try std.testing.expectEqual(@as(usize, 8), readonly.dataLen());
     try std.testing.expectEqual(@as(u64, 123), readonly.lamports());
 
-    var data_ref = try readonly.tryBorrowData();
-    try std.testing.expectEqual(@as(u8, 0), data_ref.value[0]);
-    data_ref.release();
-
-    var lamports_ref = try readonly.tryBorrowLamports();
-    try std.testing.expectEqual(@as(u64, 123), lamports_ref.value.*);
-    lamports_ref.release();
-
+    try std.testing.expect(!@hasDecl(ReadonlyAccount, "tryBorrowData"));
+    try std.testing.expect(!@hasDecl(ReadonlyAccount, "tryBorrowLamports"));
     try std.testing.expect(!@hasDecl(ReadonlyAccount, "tryBorrowMutData"));
     try std.testing.expect(!@hasDecl(ReadonlyAccount, "tryBorrowMutLamports"));
     try std.testing.expect(!@hasField(ReadonlyAccount, "account"));
+    try std.testing.expect(!@hasField(ReadonlyAccount, "raw"));
+    try std.testing.expect(!@hasField(ReadonlyAccount, "account_addr"));
 
     var writable_input = testAccount(19, false, true, false);
     try std.testing.expectError(error.ImmutableAccount, bindAccountField(ReadonlyAccount, .{ .raw = &writable_input }));
@@ -1072,9 +1052,13 @@ test "ProgramAccount validates executable accounts and expected ids" {
 
     try std.testing.expectEqual(@as(u8, 20), program.key()[0]);
     try std.testing.expect(program.executable());
+    try std.testing.expect(!@hasDecl(ProgramAccount, "tryBorrowData"));
+    try std.testing.expect(!@hasDecl(ProgramAccount, "tryBorrowLamports"));
     try std.testing.expect(!@hasDecl(ProgramAccount, "tryBorrowMutData"));
     try std.testing.expect(!@hasDecl(ProgramAccount, "tryBorrowMutLamports"));
     try std.testing.expect(!@hasField(ProgramAccount, "account"));
+    try std.testing.expect(!@hasField(ProgramAccount, "raw"));
+    try std.testing.expect(!@hasField(ProgramAccount, "account_addr"));
 
     var not_executable = testAccount(21, false, false, false);
     try std.testing.expectError(error.InvalidArgument, bindAccountField(ProgramAccount, .{ .raw = &not_executable }));

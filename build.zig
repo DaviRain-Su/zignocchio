@@ -102,6 +102,27 @@ pub fn build(b: *std.Build) !void {
         "tests/compile_fail/program_account_no_mut_lamports.zig",
         "tryBorrowMutLamports",
     );
+    addCompileFailFixture(
+        b,
+        test_step,
+        "signer_no_account_addr",
+        "tests/compile_fail/signer_no_account_addr.zig",
+        "account_addr",
+    );
+    addCompileFailFixture(
+        b,
+        test_step,
+        "readonly_account_no_account_addr",
+        "tests/compile_fail/readonly_account_no_account_addr.zig",
+        "account_addr",
+    );
+    addCompileFailFixture(
+        b,
+        test_step,
+        "program_account_no_account_addr",
+        "tests/compile_fail/program_account_no_account_addr.zig",
+        "account_addr",
+    );
 
     // Keep representative low-level examples build-safe as part of the normal
     // Zig validator. Each regression build uses its own bitcode path so
