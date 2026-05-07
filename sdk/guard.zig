@@ -217,12 +217,12 @@ test "assert_pda fails for too many seeds" {
 }
 
 test "assert_discriminator passes for matching byte" {
-    const data = &[_]u8{0xAB, 0x00, 0x00};
+    const data = &[_]u8{ 0xAB, 0x00, 0x00 };
     try assert_discriminator(data, 0xAB);
 }
 
 test "assert_discriminator fails for mismatch" {
-    const data = &[_]u8{0xAB, 0x00, 0x00};
+    const data = &[_]u8{ 0xAB, 0x00, 0x00 };
     try std.testing.expectError(error.InvalidAccountData, assert_discriminator(data, 0xCD));
 }
 
@@ -250,12 +250,12 @@ test "assert_rent_exempt boundary at 256 bytes" {
 // --- assert_initialized / assert_uninitialized ---
 
 test "assert_initialized passes for non-zero data" {
-    const data = &[_]u8{0, 0, 1, 0};
+    const data = &[_]u8{ 0, 0, 1, 0 };
     try assert_initialized(data);
 }
 
 test "assert_initialized fails for all-zero data" {
-    const data = &[_]u8{0, 0, 0, 0};
+    const data = &[_]u8{ 0, 0, 0, 0 };
     try std.testing.expectError(error.UninitializedAccount, assert_initialized(data));
 }
 
@@ -265,7 +265,7 @@ test "assert_initialized fails for empty data" {
 }
 
 test "assert_uninitialized passes for all-zero data" {
-    const data = &[_]u8{0, 0, 0, 0};
+    const data = &[_]u8{ 0, 0, 0, 0 };
     try assert_uninitialized(data);
 }
 
@@ -275,7 +275,7 @@ test "assert_uninitialized passes for empty data" {
 }
 
 test "assert_uninitialized fails for non-zero data" {
-    const data = &[_]u8{0, 0, 1, 0};
+    const data = &[_]u8{ 0, 0, 1, 0 };
     try std.testing.expectError(error.AccountAlreadyInitialized, assert_uninitialized(data));
 }
 

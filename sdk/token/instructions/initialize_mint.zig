@@ -56,9 +56,9 @@ pub const InitializeMint = struct {
         }
 
         // Build instruction
-                var token_program_id: types.Pubkey = undefined;
-                token_mod.getTokenProgramId(&token_program_id);
-                const instruction = cpi.Instruction{
+        var token_program_id: types.Pubkey = undefined;
+        token_mod.getTokenProgramId(&token_program_id);
+        const instruction = cpi.Instruction{
             .program_id = &token_program_id,
             .accounts = &account_metas,
             .data = instruction_data[0..length],
@@ -113,9 +113,9 @@ pub const InitializeMint2 = struct {
         }
 
         // Build instruction
-                var token_program_id: types.Pubkey = undefined;
-                token_mod.getTokenProgramId(&token_program_id);
-                const instruction = cpi.Instruction{
+        var token_program_id: types.Pubkey = undefined;
+        token_mod.getTokenProgramId(&token_program_id);
+        const instruction = cpi.Instruction{
             .program_id = &token_program_id,
             .accounts = &account_metas,
             .data = instruction_data[0..length],

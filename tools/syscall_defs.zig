@@ -1,6 +1,5 @@
 /// Syscall definitions from solana-sdk
 /// Based on: https://github.com/anza-xyz/solana-sdk/blob/master/define-syscall/src/definitions.rs
-
 pub const SyscallDef = struct {
     name: []const u8,
     signature: []const u8,

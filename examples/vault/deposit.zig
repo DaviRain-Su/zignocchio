@@ -6,7 +6,6 @@ const sdk = @import("sdk");
 /// constant because Zig 0.16's BPF backend places all-zero module-scope data
 /// at address 0x0, which causes an access violation when we take its address.
 /// Use a local `var` copy wherever the system program ID is needed.
-
 pub const DISCRIMINATOR: u8 = 0;
 
 pub const DepositAccounts = struct {

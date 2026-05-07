@@ -171,8 +171,7 @@ pub fn initializeAccount(
         .data = ix_data,
     };
 
-    try sdk.invoke(&instruction,
-        &[_]sdk.AccountInfo{ account, mint, owner });
+    try sdk.invoke(&instruction, &[_]sdk.AccountInfo{ account, mint, owner });
 }
 
 /// Initialize a mint via Token-2022 Program CPI.
@@ -236,8 +235,7 @@ pub fn mintTo(
         .data = &ix_data,
     };
 
-    try sdk.invoke(&instruction,
-        &[_]sdk.AccountInfo{ mint, account, mint_authority });
+    try sdk.invoke(&instruction, &[_]sdk.AccountInfo{ mint, account, mint_authority });
 }
 
 /// Burn tokens via Token-2022 Program CPI.
@@ -266,8 +264,7 @@ pub fn burn(
         .data = &ix_data,
     };
 
-    try sdk.invoke(&instruction,
-        &[_]sdk.AccountInfo{ account, mint, owner });
+    try sdk.invoke(&instruction, &[_]sdk.AccountInfo{ account, mint, owner });
 }
 
 // =============================================================================
