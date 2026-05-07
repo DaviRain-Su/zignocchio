@@ -4,24 +4,49 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { SurfpoolContext, DeployOptions } from './types';
 
+const SURFPOOL_PORT = 8899;
+const SURFPOOL_RPC_URL = `http://127.0.0.1:${SURFPOOL_PORT}`;
+
+function sleep(ms: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+function surfpoolListenerPids(): number[] {
+  try {
+    const output = execSync(`lsof -tiTCP:${SURFPOOL_PORT} -sTCP:LISTEN -P -n`, {
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+    });
+    return output
+      .trim()
+      .split(/\s+/)
+      .filter(Boolean)
+      .map((pid) => Number(pid))
+      .filter((pid) => Number.isInteger(pid) && pid > 0);
+  } catch (_error) {
+    return [];
+  }
+}
+
+function assertSurfpoolPortFree(): void {
+  const listeners = surfpoolListenerPids();
+  if (listeners.length > 0) {
+    throw new Error(
+      `port ${SURFPOOL_PORT} already has listener PID(s): ${listeners.join(', ')}`
+    );
+  }
+}
+
 /**
  * Start a surfpool test validator in CI mode.
  *
- * Kills any existing surfpool process first, then waits for the RPC endpoint
- * to become available.
+ * Requires the mission-owned surfpool port to be free, starts a new tracked
+ * process group, then waits for the RPC endpoint to become available.
  *
  * @returns A context object with connection, validator process, and funded payer keypair
  */
 export async function startSurfpool(): Promise<SurfpoolContext> {
-  // Kill any existing surfpool
-  try {
-    execSync('pkill -f surfpool', { stdio: 'ignore' });
-  } catch (e) {
-    // Ignore if no process found
-  }
-
-  // Wait for cleanup
-  await new Promise(resolve => setTimeout(resolve, 2000));
+  assertSurfpoolPortFree();
 
   const validator = spawn('surfpool', [
     'start',
@@ -43,10 +68,10 @@ export async function startSurfpool(): Promise<SurfpoolContext> {
 
   validator.unref();
 
-  // Wait for validator to be ready
-  await new Promise(resolve => setTimeout(resolve, 5000));
+  // Wait for validator to be ready.
+  await sleep(5000);
 
-  const connection = new Connection('http://localhost:8899', 'confirmed');
+  const connection = new Connection(SURFPOOL_RPC_URL, 'confirmed');
 
   // Create and fund a payer account
   const payer = Keypair.generate();
@@ -84,7 +109,7 @@ export async function deployProgram(
     JSON.stringify(Array.from(programKeypair.secretKey))
   );
 
-  const deployRes = await fetch('http://127.0.0.1:8899', {
+  const deployRes = await fetch(SURFPOOL_RPC_URL, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -126,18 +151,26 @@ export async function deployProgram(
  * @param ctx - The surfpool context returned by `startSurfpool`
  */
 export async function stopSurfpool(ctx: SurfpoolContext): Promise<void> {
-  if (ctx.validator) {
+  if (ctx.validator?.pid) {
     try {
-      process.kill(-ctx.validator.pid!);
-    } catch (e) {
-      // Ignore
+      process.kill(-ctx.validator.pid, 'SIGTERM');
+    } catch (_groupError) {
+      try {
+        ctx.validator.kill('SIGTERM');
+      } catch (_childError) {
+        // Ignore if the process has already exited.
+      }
     }
-  }
 
-  try {
-    execSync('pkill -f surfpool', { stdio: 'ignore' });
-  } catch (e) {
-    // Ignore
+    await sleep(1000);
+
+    for (const pid of surfpoolListenerPids()) {
+      try {
+        process.kill(pid, 'SIGKILL');
+      } catch (_error) {
+        // Ignore if the listener exited between lsof and kill.
+      }
+    }
   }
 
   try {
@@ -147,5 +180,12 @@ export async function stopSurfpool(ctx: SurfpoolContext): Promise<void> {
   }
 
   // Give the OS a moment to release the port
-  await new Promise(resolve => setTimeout(resolve, 100));
+  await sleep(500);
+
+  const leakedListeners = surfpoolListenerPids();
+  if (leakedListeners.length > 0) {
+    throw new Error(
+      `port ${SURFPOOL_PORT} still has listener PID(s): ${leakedListeners.join(', ')}`
+    );
+  }
 }

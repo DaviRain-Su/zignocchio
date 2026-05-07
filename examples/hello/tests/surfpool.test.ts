@@ -11,12 +11,74 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { createHash } from 'crypto';
 
+const SURFPOOL_PORT = 8899;
+
 function instructionDiscriminator(name: string): Buffer {
   return createHash('sha256').update(`global:${name}`).digest().subarray(0, 8);
 }
 
 async function sleep(ms: number): Promise<void> {
   await new Promise(resolve => setTimeout(resolve, ms));
+}
+
+function surfpoolListenerPids(): number[] {
+  try {
+    const output = execSync(`lsof -tiTCP:${SURFPOOL_PORT} -sTCP:LISTEN -P -n`, {
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+    });
+    return output
+      .trim()
+      .split(/\s+/)
+      .filter(Boolean)
+      .map((pid) => Number(pid))
+      .filter((pid) => Number.isInteger(pid) && pid > 0);
+  } catch (_error) {
+    return [];
+  }
+}
+
+function assertSurfpoolPortFree(): void {
+  const listeners = surfpoolListenerPids();
+  if (listeners.length > 0) {
+    throw new Error(
+      `port ${SURFPOOL_PORT} already has listener PID(s): ${listeners.join(', ')}`
+    );
+  }
+}
+
+async function stopStartedSurfpool(validator: ChildProcess | undefined): Promise<void> {
+  if (validator?.pid) {
+    try {
+      process.kill(-validator.pid, 'SIGTERM');
+    } catch (_groupError) {
+      try {
+        validator.kill('SIGTERM');
+      } catch (_childError) {
+        // Ignore if the process has already exited.
+      }
+    }
+
+    await sleep(1000);
+
+    const remainingListeners = surfpoolListenerPids();
+    for (const pid of remainingListeners) {
+      try {
+        process.kill(pid, 'SIGKILL');
+      } catch (_error) {
+        // Ignore if the listener exited between lsof and kill.
+      }
+    }
+
+    await sleep(500);
+  }
+
+  const leakedListeners = surfpoolListenerPids();
+  if (leakedListeners.length > 0) {
+    throw new Error(
+      `port ${SURFPOOL_PORT} still has listener PID(s): ${leakedListeners.join(', ')}`
+    );
+  }
 }
 
 describe('Hello World Program', () => {
@@ -48,6 +110,8 @@ describe('Hello World Program', () => {
     if (!fs.existsSync(programPath)) {
       throw new Error(`Program not found at ${programPath}. Run 'zig build' first.`);
     }
+
+    assertSurfpoolPortFree();
 
     console.log('Starting surfpool...');
     validator = spawn('surfpool', [
@@ -132,32 +196,9 @@ describe('Hello World Program', () => {
   }, 60000); // 60 second timeout
 
   afterAll(async () => {
-    // Stop only the surfpool process group started by this test.
-    if (validator?.pid) {
-      try {
-        process.kill(-validator.pid, 'SIGTERM');
-      } catch (groupError) {
-        try {
-          validator.kill('SIGTERM');
-        } catch (childError) {
-          // Ignore if the process has already exited.
-        }
-      }
-
-      await sleep(1000);
-
-      if (!validator.killed) {
-        try {
-          process.kill(-validator.pid, 'SIGKILL');
-        } catch (groupError) {
-          try {
-            validator.kill('SIGKILL');
-          } catch (childError) {
-            // Ignore if the process has already exited.
-          }
-        }
-      }
-    }
+    // Stop only the surfpool process group started by this test, then fall
+    // back to any listener still bound to the mission-owned surfpool port.
+    await stopStartedSurfpool(validator);
 
     // Clean up temp keypair file
     try {
