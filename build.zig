@@ -125,6 +125,13 @@ pub fn build(b: *std.Build) !void {
         "tests/compile_fail/program_account_no_account_addr.zig",
         "account_addr",
     );
+    addCompileFailFixture(
+        b,
+        test_step,
+        "idl_args_unsupported",
+        "tests/compile_fail/idl_args_unsupported.zig",
+        "framework IDL generation does not support instruction args yet",
+    );
 
     // Keep representative low-level examples build-safe as part of the normal
     // Zig validator. Each regression build uses its own bitcode path so

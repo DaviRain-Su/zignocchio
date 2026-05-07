@@ -958,6 +958,64 @@ const ProgramValidationProgram = struct {
     };
 };
 
+const IdlMetadataAccounts = struct {
+    authority: Signer,
+    writable_vault: WritableAccount,
+    readonly_config: ReadonlyAccount,
+    token_program: ProgramAccount,
+    raw_escape: types.AccountInfo,
+};
+
+var observed_idl_handler: enum { none, initialize_metadata, refresh_metadata, close_metadata } = .none;
+
+fn resetObservedIdlDispatch() void {
+    observed_idl_handler = .none;
+}
+
+fn observeIdlMetadataAccounts(ctx: Context(IdlMetadataAccounts)) errors.ProgramResult {
+    if (!ctx.accounts.authority.isSigner()) return error.MissingRequiredSignature;
+    if (!ctx.accounts.writable_vault.isWritable()) return error.ImmutableAccount;
+    if (ctx.accounts.readonly_config.isWritable()) return error.ImmutableAccount;
+    if (!ctx.accounts.token_program.executable()) return error.InvalidArgument;
+    if (ctx.accounts.raw_escape.isSigner()) return error.InvalidArgument;
+    if (ctx.accounts.raw_escape.isWritable()) return error.InvalidArgument;
+    if (ctx.accounts.raw_escape.executable()) return error.InvalidArgument;
+}
+
+fn idlInitializeMetadata(ctx: Context(IdlMetadataAccounts), _: []const u8) errors.ProgramResult {
+    observed_idl_handler = .initialize_metadata;
+    try observeIdlMetadataAccounts(ctx);
+}
+
+fn idlRefreshMetadata(ctx: Context(IdlMetadataAccounts), _: []const u8) errors.ProgramResult {
+    observed_idl_handler = .refresh_metadata;
+    try observeIdlMetadataAccounts(ctx);
+}
+
+fn idlCloseMetadata(_: Context(EmptyAccounts), _: []const u8) errors.ProgramResult {
+    observed_idl_handler = .close_metadata;
+}
+
+const IdlMetadataProgram = struct {
+    pub const Instruction = .{
+        .{
+            .name = "initialize_metadata",
+            .accounts = IdlMetadataAccounts,
+            .handler = idlInitializeMetadata,
+        },
+        .{
+            .name = "refresh_metadata",
+            .accounts = IdlMetadataAccounts,
+            .handler = idlRefreshMetadata,
+        },
+        .{
+            .name = "close_metadata",
+            .accounts = EmptyAccounts,
+            .handler = idlCloseMetadata,
+        },
+    };
+};
+
 test "instructionDiscriminator matches Anchor known vectors" {
     try std.testing.expectEqualSlices(u8, &[_]u8{ 0x95, 0x76, 0x3b, 0xdc, 0xc4, 0x7f, 0xa1, 0xb3 }, &instructionDiscriminator("hello"));
     try std.testing.expectEqualSlices(u8, &[_]u8{ 0xaf, 0xaf, 0x6d, 0x1f, 0x0d, 0x98, 0x9b, 0xed }, &instructionDiscriminator("initialize"));
@@ -1408,4 +1466,93 @@ test "IDL JSON for hello-shaped program is deterministic and schema-shaped" {
         \\}
         \\
     , output.items);
+}
+
+test "IDL metadata fixture preserves order flags raw policy and dispatch agreement" {
+    var output: std.ArrayList(u8) = .empty;
+    defer output.deinit(std.testing.allocator);
+    var writer: IdlJsonArrayListWriter = .{
+        .out = &output,
+        .allocator = std.testing.allocator,
+    };
+
+    try writeIdlJson(IdlMetadataProgram, &writer, "idl-metadata");
+    const json = output.items;
+
+    const initialize_name = "\"name\": \"initialize_metadata\"";
+    const refresh_name = "\"name\": \"refresh_metadata\"";
+    const close_name = "\"name\": \"close_metadata\"";
+    const initialize_index = std.mem.indexOf(u8, json, initialize_name) orelse return error.TestExpectedEqual;
+    const refresh_index = std.mem.indexOf(u8, json, refresh_name) orelse return error.TestExpectedEqual;
+    const close_index = std.mem.indexOf(u8, json, close_name) orelse return error.TestExpectedEqual;
+    try std.testing.expect(initialize_index < refresh_index);
+    try std.testing.expect(refresh_index < close_index);
+    try std.testing.expectEqual(@as(?usize, null), std.mem.indexOfPos(u8, json, initialize_index + initialize_name.len, initialize_name));
+    try std.testing.expectEqual(@as(?usize, null), std.mem.indexOfPos(u8, json, refresh_index + refresh_name.len, refresh_name));
+    try std.testing.expectEqual(@as(?usize, null), std.mem.indexOfPos(u8, json, close_index + close_name.len, close_name));
+
+    const authority_index = std.mem.indexOf(u8, json, "\"name\": \"authority\"") orelse return error.TestExpectedEqual;
+    const writable_index = std.mem.indexOf(u8, json, "\"name\": \"writable_vault\"") orelse return error.TestExpectedEqual;
+    const readonly_index = std.mem.indexOf(u8, json, "\"name\": \"readonly_config\"") orelse return error.TestExpectedEqual;
+    const program_index = std.mem.indexOf(u8, json, "\"name\": \"token_program\"") orelse return error.TestExpectedEqual;
+    const raw_index = std.mem.indexOf(u8, json, "\"name\": \"raw_escape\"") orelse return error.TestExpectedEqual;
+    try std.testing.expect(authority_index < writable_index);
+    try std.testing.expect(writable_index < readonly_index);
+    try std.testing.expect(readonly_index < program_index);
+    try std.testing.expect(program_index < raw_index);
+
+    try std.testing.expect(std.mem.indexOf(u8, json,
+        \\"name": "authority",
+        \\          "isSigner": true,
+        \\          "isWritable": false,
+        \\          "isProgram": false
+    ) != null);
+    try std.testing.expect(std.mem.indexOf(u8, json,
+        \\"name": "writable_vault",
+        \\          "isSigner": false,
+        \\          "isWritable": true,
+        \\          "isProgram": false
+    ) != null);
+    try std.testing.expect(std.mem.indexOf(u8, json,
+        \\"name": "token_program",
+        \\          "isSigner": false,
+        \\          "isWritable": false,
+        \\          "isProgram": true
+    ) != null);
+    try std.testing.expect(std.mem.indexOf(u8, json,
+        \\"name": "raw_escape",
+        \\          "isSigner": false,
+        \\          "isWritable": false,
+        \\          "isProgram": false
+    ) != null);
+    try std.testing.expect(std.mem.indexOf(u8, json, "\"args\": []") != null);
+
+    var raw0 = testAccount(29, true, false, false);
+    var raw1 = testAccount(30, false, true, false);
+    var raw2 = testAccount(31, false, false, false);
+    var raw3 = testAccount(32, false, false, true);
+    var raw4 = testAccount(33, false, false, false);
+    var runtime_accounts = [_]types.AccountInfo{
+        .{ .raw = &raw0 },
+        .{ .raw = &raw1 },
+        .{ .raw = &raw2 },
+        .{ .raw = &raw3 },
+        .{ .raw = &raw4 },
+    };
+
+    const idl_entries = [_]struct {
+        name: []const u8,
+        observed: @TypeOf(observed_idl_handler),
+    }{
+        .{ .name = "initialize_metadata", .observed = .initialize_metadata },
+        .{ .name = "refresh_metadata", .observed = .refresh_metadata },
+        .{ .name = "close_metadata", .observed = .close_metadata },
+    };
+
+    inline for (idl_entries) |entry| {
+        resetObservedIdlDispatch();
+        const discriminator = comptime instructionDiscriminator(entry.name);
+        try dispatch(IdlMetadataProgram, runtime_accounts[0..], &discriminator);
+        try std.testing.expectEqual(entry.observed, observed_idl_handler);
+    }
 }
