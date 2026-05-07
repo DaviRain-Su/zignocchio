@@ -6,7 +6,7 @@ const sdk = @import("sdk");
 
 const Accounts = struct {};
 
-const Program = struct {
+pub const Program = struct {
     pub const max_accounts = 1;
 
     pub const Instruction = .{

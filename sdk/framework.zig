@@ -8,6 +8,24 @@ const errors = @import("errors.zig");
 const entrypoint = @import("entrypoint.zig");
 const types = @import("types.zig");
 
+/// Minimal adapter for writing IDL JSON into an unmanaged ArrayList.
+pub const IdlJsonArrayListWriter = struct {
+    out: *std.ArrayList(u8),
+    allocator: std.mem.Allocator,
+
+    pub fn writeAll(self: *@This(), bytes: []const u8) !void {
+        try self.out.appendSlice(self.allocator, bytes);
+    }
+
+    pub fn writeByte(self: *@This(), byte: u8) !void {
+        try self.out.append(self.allocator, byte);
+    }
+
+    pub fn print(self: *@This(), comptime fmt: []const u8, args: anytype) !void {
+        try self.out.print(self.allocator, fmt, args);
+    }
+};
+
 /// Marker value used by the first public account wrapper declarations.
 const AccountWrapperKind = enum {
     signer,
@@ -172,6 +190,45 @@ pub fn instructionDiscriminator(comptime instruction_name: []const u8) [8]u8 {
     var digest: [32]u8 = undefined;
     std.crypto.hash.sha2.Sha256.hash(preimage, &digest, .{});
     return digest[0..8].*;
+}
+
+/// Write deterministic client-facing IDL JSON for a framework Program.
+///
+/// This host/build-side helper reflects the same public Program declaration
+/// consumed by dispatch. The prototype schema intentionally uses stable key
+/// ordering and explicit empty arrays for accounts/args so clients can validate
+/// the shape without running a validator or BPF VM.
+pub fn writeIdlJson(
+    comptime Program: type,
+    writer: anytype,
+    program_name: []const u8,
+) !void {
+    validateProgram(Program);
+
+    try writer.writeAll(
+        \\{
+        \\  "version": "0.1.0",
+        \\  "name": "
+    );
+    try writeJsonStringContents(writer, program_name);
+    try writer.writeAll(
+        \\",
+        \\  "metadata": {
+        \\    "origin": "zignocchio",
+        \\    "schema": "zignocchio-idl-v0"
+        \\  },
+        \\  "instructions": [
+        \\
+    );
+
+    try writeIdlInstructions(Program.Instruction, writer);
+    try writer.writeAll("\n");
+
+    try writer.writeAll(
+        \\  ]
+        \\}
+        \\
+    );
 }
 
 /// Validate a framework Program declaration and return a Solana entrypoint.
@@ -369,6 +426,152 @@ fn dispatchDiscriminator(
     }
 
     return error.InvalidInstructionData;
+}
+
+fn writeIdlInstructions(comptime instructions: anytype, writer: anytype) !void {
+    const Instructions = @TypeOf(instructions);
+    const struct_info = @typeInfo(Instructions).@"struct";
+
+    if (struct_info.is_tuple) {
+        inline for (struct_info.fields, 0..) |field, index| {
+            if (index != 0) {
+                try writer.writeAll(",\n");
+            }
+            const instruction = @field(instructions, field.name);
+            try writeIdlInstruction(instruction, writer);
+        }
+    } else {
+        try writeIdlInstruction(instructions, writer);
+    }
+}
+
+fn writeIdlInstruction(comptime instruction: anytype, writer: anytype) !void {
+    try validateIdlArgsPolicy(instruction);
+
+    try writer.writeAll(
+        \\    {
+        \\      "name": "
+    );
+    try writeJsonStringContents(writer, instruction.name);
+    try writer.writeAll(
+        \\",
+        \\      "discriminator": [
+    );
+    const discriminator = comptime instructionDiscriminator(instruction.name);
+    inline for (discriminator, 0..) |byte, index| {
+        if (index != 0) {
+            try writer.writeAll(", ");
+        }
+        try writer.print("{}", .{byte});
+    }
+    try writer.writeAll(
+        \\],
+        \\      "accounts": [
+    );
+    try writeIdlAccounts(instruction.accounts, writer);
+    try writer.writeAll(
+        \\],
+        \\      "args": []
+        \\    }
+    );
+}
+
+fn writeIdlAccounts(comptime Accounts: type, writer: anytype) !void {
+    validateAccountsType(Accounts);
+    const fields = @typeInfo(Accounts).@"struct".fields;
+
+    if (fields.len == 0) {
+        return;
+    }
+
+    try writer.writeAll("\n");
+    inline for (fields, 0..) |field, index| {
+        if (index != 0) {
+            try writer.writeAll(",\n");
+        }
+        try writer.writeAll(
+            \\        {
+            \\          "name": "
+        );
+        try writeJsonStringContents(writer, field.name);
+        try writer.writeAll(
+            \\",
+            \\          "isSigner":
+        );
+        try writer.writeAll(" ");
+        try writer.writeAll(if (comptime idlAccountIsSigner(field.type)) "true" else "false");
+        try writer.writeAll(
+            \\,
+            \\          "isWritable":
+        );
+        try writer.writeAll(" ");
+        try writer.writeAll(if (comptime idlAccountIsWritable(field.type)) "true" else "false");
+        try writer.writeAll(
+            \\,
+            \\          "isProgram":
+        );
+        try writer.writeAll(" ");
+        try writer.writeAll(if (comptime idlAccountIsProgram(field.type)) "true" else "false");
+        try writer.writeAll(
+            \\
+            \\        }
+        );
+    }
+    try writer.writeAll("\n      ");
+}
+
+fn validateIdlArgsPolicy(comptime instruction: anytype) !void {
+    const Instruction = @TypeOf(instruction);
+    if (!@hasField(Instruction, "args")) {
+        return;
+    }
+
+    const args = instruction.args;
+    const Args = @TypeOf(args);
+    switch (@typeInfo(Args)) {
+        .@"struct" => |struct_info| {
+            if (struct_info.is_tuple and struct_info.fields.len == 0) {
+                return;
+            }
+        },
+        else => {},
+    }
+
+    @compileError("framework IDL generation does not support instruction args yet");
+}
+
+fn idlAccountIsSigner(comptime Field: type) bool {
+    if (comptime accountWrapperKind(Field)) |kind| {
+        return kind == .signer;
+    }
+    return false;
+}
+
+fn idlAccountIsWritable(comptime Field: type) bool {
+    if (comptime accountWrapperKind(Field)) |kind| {
+        return kind == .writable;
+    }
+    return false;
+}
+
+fn idlAccountIsProgram(comptime Field: type) bool {
+    if (comptime accountWrapperKind(Field)) |kind| {
+        return kind == .program;
+    }
+    return false;
+}
+
+fn writeJsonStringContents(writer: anytype, bytes: []const u8) !void {
+    for (bytes) |byte| {
+        switch (byte) {
+            '"' => try writer.writeAll("\\\""),
+            '\\' => try writer.writeAll("\\\\"),
+            '\n' => try writer.writeAll("\\n"),
+            '\r' => try writer.writeAll("\\r"),
+            '\t' => try writer.writeAll("\\t"),
+            else => try writer.writeByte(byte),
+        }
+    }
 }
 
 fn invokeInstruction(
@@ -1174,4 +1377,35 @@ test "handler errors propagate unchanged" {
 
     try std.testing.expectEqual(.error_handler, observed_handler);
     try std.testing.expectEqual(@as(usize, 1), observed_calls);
+}
+
+test "IDL JSON for hello-shaped program is deterministic and schema-shaped" {
+    var output: std.ArrayList(u8) = .empty;
+    defer output.deinit(std.testing.allocator);
+    var writer: IdlJsonArrayListWriter = .{
+        .out = &output,
+        .allocator = std.testing.allocator,
+    };
+
+    try writeIdlJson(EmptyCompatibleProgram, &writer, "hello");
+
+    try std.testing.expectEqualStrings(
+        \\{
+        \\  "version": "0.1.0",
+        \\  "name": "hello",
+        \\  "metadata": {
+        \\    "origin": "zignocchio",
+        \\    "schema": "zignocchio-idl-v0"
+        \\  },
+        \\  "instructions": [
+        \\    {
+        \\      "name": "hello",
+        \\      "discriminator": [149, 118, 59, 220, 196, 127, 161, 179],
+        \\      "accounts": [],
+        \\      "args": []
+        \\    }
+        \\  ]
+        \\}
+        \\
+    , output.items);
 }

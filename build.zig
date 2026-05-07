@@ -19,6 +19,9 @@ pub fn build(b: *std.Build) !void {
     const example_name = b.option([]const u8, "example", "Example to build (hello, counter, vault, transfer-sol, pda-storage, token-vault, escrow)") orelse "counter";
 
     const link_program = addExampleProgram(b, example_name, "entrypoint.bc");
+    const sdk_module = b.createModule(.{
+        .root_source_file = b.path("sdk/zignocchio.zig"),
+    });
 
     // Default install step depends on linking
     b.getInstallStep().dependOn(&link_program.step);
@@ -36,11 +39,10 @@ pub fn build(b: *std.Build) !void {
     });
     b.installArtifact(cli_exe);
 
+    addIdlStep(b, example_name, sdk_module, optimize);
+
     // Optional unit tests (run on host, not BPF)
     const test_step = b.step("test", "Run unit tests");
-    const sdk_module = b.createModule(.{
-        .root_source_file = b.path("sdk/zignocchio.zig"),
-    });
     const test_module = b.createModule(.{
         .root_source_file = b.path("examples/hello/lib.zig"),
         .target = b.graph.host,
@@ -132,6 +134,44 @@ pub fn build(b: *std.Build) !void {
         const regression_build = addExampleProgram(b, regression_example, regression_bitcode);
         test_step.dependOn(&regression_build.step);
     }
+}
+
+fn addIdlStep(
+    b: *std.Build,
+    example_name: []const u8,
+    sdk_module: *std.Build.Module,
+    optimize: std.builtin.OptimizeMode,
+) void {
+    const idl_step = b.step("idl", "Generate IDL JSON for the selected example");
+
+    const example_path = b.fmt("examples/{s}/lib.zig", .{example_name});
+    const example_module = b.createModule(.{
+        .root_source_file = b.path(example_path),
+        .target = b.graph.host,
+        .optimize = optimize,
+    });
+    example_module.addImport("sdk", sdk_module);
+
+    const idl_module = b.createModule(.{
+        .root_source_file = b.path("tools/gen_idl.zig"),
+        .target = b.graph.host,
+        .optimize = .ReleaseSafe,
+    });
+    idl_module.addImport("sdk", sdk_module);
+    idl_module.addImport("example", example_module);
+
+    const idl_exe = b.addExecutable(.{
+        .name = "zignocchio-gen-idl",
+        .root_module = idl_module,
+    });
+
+    const output_path = b.fmt("zig-out/idl/{s}.json", .{example_name});
+    const mkdir_idl = b.addSystemCommand(&.{ "mkdir", "-p", "zig-out/idl" });
+    const run_idl = b.addRunArtifact(idl_exe);
+    run_idl.addArgs(&.{ example_name, output_path });
+    run_idl.step.dependOn(&mkdir_idl.step);
+
+    idl_step.dependOn(&run_idl.step);
 }
 
 fn addCompileFailFixture(
