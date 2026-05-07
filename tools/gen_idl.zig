@@ -31,8 +31,16 @@ pub fn main(init: std.process.Init) !void {
 
     try sdk.framework.writeIdlJson(example.Program, &writer, program_name);
 
-    try std.Io.Dir.cwd().writeFile(init.io, .{
-        .sub_path = output_path,
+    const temp_output_path = try std.fmt.allocPrint(allocator, "{s}.tmp", .{output_path});
+    defer allocator.free(temp_output_path);
+
+    const cwd = std.Io.Dir.cwd();
+    errdefer cwd.deleteFile(init.io, temp_output_path) catch {};
+
+    try cwd.writeFile(init.io, .{
+        .sub_path = temp_output_path,
         .data = output.items,
     });
+
+    try cwd.rename(temp_output_path, cwd, output_path, init.io);
 }

@@ -173,9 +173,12 @@ fn addIdlStep(
     });
 
     const output_path = b.fmt("zig-out/idl/{s}.json", .{example_name});
+    const temp_output_path = b.fmt("{s}.tmp", .{output_path});
     const mkdir_idl = b.addSystemCommand(&.{ "mkdir", "-p", "zig-out/idl" });
+    const remove_stale_idl = b.addSystemCommand(&.{ "rm", "-f", output_path, temp_output_path });
     const run_idl = b.addRunArtifact(idl_exe);
     run_idl.addArgs(&.{ example_name, output_path });
+    idl_exe.step.dependOn(&remove_stale_idl.step);
     run_idl.step.dependOn(&mkdir_idl.step);
 
     idl_step.dependOn(&run_idl.step);
